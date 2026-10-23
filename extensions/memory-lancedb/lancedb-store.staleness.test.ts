@@ -35,6 +35,7 @@ describe("MemoryDB observes externally committed rows", () => {
           case "delete":
             await expect(reader.delete("alpha", external.id)).resolves.toBe(true);
             await writer.close();
+            writer.reopen();
             await expect(writer.list("alpha")).resolves.toEqual([]);
         }
       } finally {

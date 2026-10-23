@@ -683,6 +683,9 @@ export default definePluginEntry({
     api.registerService({
       id: "memory-lancedb",
       start: () => {
+        // The same MemoryDB instance is reused across stop/start; reopen it so
+        // operations admitted after restart can initialize a fresh lifecycle.
+        db.reopen();
         embeddings.start();
         captureStopped = false;
         api.logger.info(

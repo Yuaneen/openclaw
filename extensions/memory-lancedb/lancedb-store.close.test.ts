@@ -11,7 +11,7 @@ const lanceMocks = vi.hoisted(() => ({
   deleteRows: vi.fn(async () => ({ numDeletedRows: 1 })),
 }));
 
-// mock-isolation: close lifecycle tests drive an artificial delayed connect to deterministically race close against in-flight initialization; the real lancedb-runtime stays isolated so no actual database is opened.
+// mock-isolation: close lifecycle tests drive an artificial delayed connect or a gated add to deterministically race close against in-flight work; the real lancedb-runtime stays isolated so no actual database is opened.
 vi.mock("./lancedb-runtime.js", () => ({
   loadLanceDbModule: vi.fn(async () => ({
     connect: lanceMocks.connect,
@@ -88,14 +88,14 @@ describe("MemoryDB close lifecycle is terminal", () => {
     expect(lanceMocks.add).not.toHaveBeenCalled();
   });
 
-  test("operations submitted while close is pending wait and then re-initialize cleanly", async () => {
+  test("admissions are rejected once close is pending and stay rejected until reopen", async () => {
     const gate = createDeferred<void>();
     lanceMocks.connect.mockImplementationOnce(async () => {
       await gate.promise;
       return makeDbHandle();
     });
 
-    // Start a store that is awaiting initialization, then close while it is in flight.
+    // A store admitted before close races the in-flight initialization.
     const pending = db.store("alpha", {
       text: "during close",
       vector: [1, 0, 0],
@@ -106,34 +106,49 @@ describe("MemoryDB close lifecycle is terminal", () => {
 
     const closing = db.close();
 
-    // Submit another operation while close is still pending: it must not commit
-    // through the retiring lifecycle and must wait for close to settle.
-    const duringClose = db.store("beta", {
-      text: "submitted while close pending",
-      vector: [0, 1, 0],
-      importance: 0.5,
-      category: "fact",
-    });
-    gate.resolve();
+    // New admission while close is pending must be rejected outright — it must
+    // not re-open the database while the service is stopped.
+    await expect(
+      db.store("beta", {
+        text: "submitted while close pending",
+        vector: [0, 1, 0],
+        importance: 0.5,
+        category: "fact",
+      }),
+    ).rejects.toThrow(/closed/i);
 
+    gate.resolve();
     await expect(pending).rejects.toThrow(/closed/i);
     await closing;
 
-    // The during-close operation re-initializes on a fresh lifecycle and commits.
-    await expect(duringClose).resolves.toMatchObject({
-      text: "submitted while close pending",
-    });
-    expect(lanceMocks.add).toHaveBeenCalledTimes(1);
+    // Still rejected after close: reopening is explicit via service start.
+    await expect(
+      db.store("gamma", {
+        text: "after close",
+        vector: [0, 0, 1],
+        importance: 0.5,
+        category: "fact",
+      }),
+    ).rejects.toThrow(/closed/i);
+    expect(lanceMocks.add).not.toHaveBeenCalled();
   });
 
-  test("close before first use does not disable later handle cleanup", async () => {
-    // Closing an uninitialized store must not cache a resolved close promise;
-    // otherwise a later open (after service start) leaves handles that a
-    // subsequent close skips forever.
+  test("reopen restores admissions on a fresh lifecycle and close still cleans up", async () => {
     await db.close();
 
+    // Without reopen the store is closed; after reopen a new lifecycle opens.
+    await expect(
+      db.store("alpha", {
+        text: "still closed",
+        vector: [1, 0, 0],
+        importance: 0.5,
+        category: "fact",
+      }),
+    ).rejects.toThrow(/closed/i);
+
+    db.reopen();
     await db.store("alpha", {
-      text: "after first close",
+      text: "after reopen",
       vector: [1, 0, 0],
       importance: 0.5,
       category: "fact",
@@ -145,14 +160,28 @@ describe("MemoryDB close lifecycle is terminal", () => {
     expect(lanceMocks.tableClose).toHaveBeenCalledTimes(1);
   });
 
-  test("successful close releases an initialized handle exactly once", async () => {
-    await db.store("alpha", {
-      text: "seeded",
+  test("close drains an admitted table operation before releasing handles", async () => {
+    const addGate = createDeferred<void>();
+    lanceMocks.add.mockImplementationOnce(async () => {
+      await addGate.promise;
+    });
+
+    // An explicit store is admitted and its add is now in flight on a real handle.
+    const admitted = db.store("alpha", {
+      text: "in-flight add",
       vector: [1, 0, 0],
       importance: 0.5,
       category: "fact",
     });
-    await db.close();
+    await vi.waitFor(() => expect(lanceMocks.add).toHaveBeenCalled());
+
+    // close() must wait for the admitted add to settle before releasing handles.
+    const closing = db.close();
+    addGate.resolve();
+
+    await expect(admitted).resolves.toMatchObject({ text: "in-flight add" });
+    await closing;
+
     expect(lanceMocks.connectClose).toHaveBeenCalledTimes(1);
     expect(lanceMocks.tableClose).toHaveBeenCalledTimes(1);
   });
@@ -205,7 +234,7 @@ describe("MemoryDB close lifecycle is terminal", () => {
     expect(await pendingSettled).toContain("native connect failed");
   });
 
-  test("repeated close/re-open cycles keep the store usable across generations", async () => {
+  test("repeated close/reopen cycles keep the store usable across generations", async () => {
     for (let cycle = 0; cycle < 3; cycle += 1) {
       lanceMocks.connect.mockResolvedValue(makeDbHandle());
       await db.store("alpha", {
@@ -215,6 +244,7 @@ describe("MemoryDB close lifecycle is terminal", () => {
         category: "fact",
       });
       await db.close();
+      db.reopen();
     }
     expect(lanceMocks.connectClose).toHaveBeenCalledTimes(3);
     expect(lanceMocks.tableClose).toHaveBeenCalledTimes(3);
