@@ -76,9 +76,7 @@ function registeredTool(
   name: string,
   context: Record<string, unknown> = {},
 ) {
-  const factory = registerTool.mock.calls.find(
-    ([, options]: [unknown, { name?: string }]) => options?.name === name,
-  )?.[0];
+  const factory = registerTool.mock.calls.find((call) => call[1]?.name === name)?.[0];
   const tool =
     typeof factory === "function"
       ? (factory as (ctx: Record<string, unknown>) => Record<string, unknown>)({
