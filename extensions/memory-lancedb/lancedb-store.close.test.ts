@@ -234,7 +234,11 @@ describe("MemoryDB close lifecycle is terminal", () => {
   });
 
   test("close swallows an in-flight initialization failure and still settles", async () => {
-    lanceMocks.connect.mockRejectedValueOnce(new Error("native connect failed"));
+    const gate = createDeferred<void>();
+    lanceMocks.connect.mockImplementationOnce(async () => {
+      await gate.promise;
+      throw new Error("native connect failed");
+    });
 
     const pending = db.store("alpha", {
       text: "failing init",
@@ -242,16 +246,16 @@ describe("MemoryDB close lifecycle is terminal", () => {
       importance: 0.5,
       category: "fact",
     });
-    // Pre-register the rejection handler so the racing close below cannot leave
-    // the store's rejection unhandled while Vitest watches the microtask queue.
-    const pendingSettled = pending.then(
-      () => "resolved",
-      (error: unknown) => String(error),
-    );
     await vi.waitFor(() => expect(lanceMocks.connect).toHaveBeenCalled());
 
-    await expect(db.close()).resolves.toBeUndefined();
-    expect(await pendingSettled).toContain("native connect failed");
+    // close() awaits the in-flight init; the gated rejection lands while close
+    // is pending so the rejection-handling branch is exercised, not a
+    // pre-cleared initPromise.
+    const closing = db.close();
+    gate.reject(new Error("native connect failed"));
+
+    await expect(pending).rejects.toThrow("native connect failed");
+    await expect(closing).resolves.toBeUndefined();
   });
 
   test("repeated close/reopen cycles keep the store usable across generations", async () => {
