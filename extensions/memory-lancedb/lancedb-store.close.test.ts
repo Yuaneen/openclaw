@@ -88,7 +88,7 @@ describe("MemoryDB close lifecycle is terminal", () => {
     expect(lanceMocks.add).not.toHaveBeenCalled();
   });
 
-  test("operations admitted during close wait and then re-initialize cleanly", async () => {
+  test("operations submitted while close is pending wait and then re-initialize cleanly", async () => {
     const gate = createDeferred<void>();
     lanceMocks.connect.mockImplementationOnce(async () => {
       await gate.promise;
@@ -105,28 +105,44 @@ describe("MemoryDB close lifecycle is terminal", () => {
     await vi.waitFor(() => expect(lanceMocks.connect).toHaveBeenCalled());
 
     const closing = db.close();
+
+    // Submit another operation while close is still pending: it must not commit
+    // through the retiring lifecycle and must wait for close to settle.
+    const duringClose = db.store("beta", {
+      text: "submitted while close pending",
+      vector: [0, 1, 0],
+      importance: 0.5,
+      category: "fact",
+    });
     gate.resolve();
+
     await expect(pending).rejects.toThrow(/closed/i);
     await closing;
 
-    // A later operation on the same instance starts a fresh lifecycle generation
-    // instead of writing through a stale handle.
-    lanceMocks.connect.mockResolvedValue(makeDbHandle());
-    await expect(
-      db.store("beta", {
-        text: "after close",
-        vector: [0, 1, 0],
-        importance: 0.5,
-        category: "fact",
-      }),
-    ).resolves.toMatchObject({ text: "after close" });
+    // The during-close operation re-initializes on a fresh lifecycle and commits.
+    await expect(duringClose).resolves.toMatchObject({
+      text: "submitted while close pending",
+    });
     expect(lanceMocks.add).toHaveBeenCalledTimes(1);
   });
 
-  test("close is idempotent across repeated calls", async () => {
-    await expect(db.close()).resolves.toBeUndefined();
-    await expect(db.close()).resolves.toBeUndefined();
-    await expect(db.close()).resolves.toBeUndefined();
+  test("close before first use does not disable later handle cleanup", async () => {
+    // Closing an uninitialized store must not cache a resolved close promise;
+    // otherwise a later open (after service start) leaves handles that a
+    // subsequent close skips forever.
+    await db.close();
+
+    await db.store("alpha", {
+      text: "after first close",
+      vector: [1, 0, 0],
+      importance: 0.5,
+      category: "fact",
+    });
+    expect(lanceMocks.connectClose).not.toHaveBeenCalled();
+
+    await db.close();
+    expect(lanceMocks.connectClose).toHaveBeenCalledTimes(1);
+    expect(lanceMocks.tableClose).toHaveBeenCalledTimes(1);
   });
 
   test("successful close releases an initialized handle exactly once", async () => {

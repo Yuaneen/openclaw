@@ -254,7 +254,7 @@ export class MemoryDB {
     if (this.closingPromise) {
       return this.closingPromise;
     }
-    this.closingPromise = (async () => {
+    const closing = (async () => {
       try {
         if (this.initPromise) {
           try {
@@ -271,7 +271,6 @@ export class MemoryDB {
         this.table = null;
         this.db = null;
         this.initPromise = null;
-        this.closingPromise = null;
         try {
           table?.close();
         } catch {
@@ -284,6 +283,16 @@ export class MemoryDB {
         }
       }
     })();
-    await this.closingPromise;
+    // Assign after creating the IIFE and clear only our own promise after it
+    // settles; clearing inside the IIFE races the assignment and leaves a
+    // resolved promise cached, making every later close skip handle cleanup.
+    this.closingPromise = closing;
+    try {
+      await closing;
+    } finally {
+      if (this.closingPromise === closing) {
+        this.closingPromise = null;
+      }
+    }
   }
 }
