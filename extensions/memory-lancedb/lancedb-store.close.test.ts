@@ -177,10 +177,30 @@ describe("MemoryDB close lifecycle is terminal", () => {
 
     // close() must wait for the admitted add to settle before releasing handles.
     const closing = db.close();
-    addGate.resolve();
 
+    // While the add is still pending, close must remain unsettled and the
+    // native handles must stay open (drain blocks cleanup, not a no-op).
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(lanceMocks.connectClose).not.toHaveBeenCalled();
+    expect(lanceMocks.tableClose).not.toHaveBeenCalled();
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(closed).toBe(false);
+
+    addGate.resolve();
     await expect(admitted).resolves.toMatchObject({ text: "in-flight add" });
     await closing;
+    expect(closed).toBe(true);
 
     expect(lanceMocks.connectClose).toHaveBeenCalledTimes(1);
     expect(lanceMocks.tableClose).toHaveBeenCalledTimes(1);
