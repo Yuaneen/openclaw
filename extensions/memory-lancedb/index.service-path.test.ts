@@ -173,32 +173,40 @@ describe("memory plugin service-path lifecycle (real LanceDB)", () => {
     start();
     const storeTool = registeredTool(registerTool, "memory_store");
 
-    // Admit an explicit write and stop while its native add is in flight. The
-    // write either completes or is rejected (a racing write must not land), and
-    // stop must not resolve until that admitted work has settled.
+    // Establish the connection and table first so the second store hits a real
+    // native add on an initialized handle (not initialization).
+    await storeTool.execute("svc-store-0", { text: "prime the table" });
+
+    // Admit an explicit write and stop while its native add is in flight. stop()
+    // must not resolve until the admitted write settles; record the settlement
+    // order so a fast or rejected write cannot mask a non-draining stop.
+    const order: string[] = [];
     const storePromise = storeTool.execute("svc-store-1", { text: "service-path write" });
     const storeSettled = storePromise.then(
-      () => "resolved",
-      (error: unknown) => `rejected: ${String(error).slice(0, 40)}`,
+      () => {
+        order.push("write-settled");
+        return "resolved";
+      },
+      (error: unknown) => {
+        order.push("write-settled");
+        return `rejected: ${String(error).slice(0, 40)}`;
+      },
     );
-    await vi.waitFor(() => expect(embed).toHaveBeenCalled());
 
-    let stopped = false;
     const stopPromise = stop().then(() => {
-      stopped = true;
+      order.push("stop-resolved");
     });
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
     });
-    const stoppedBeforeWrite = stopped;
+    const stoppedBeforeWrite = order.includes("stop-resolved");
 
     const storeResult = await storeSettled;
     await stopPromise;
-    const stoppedAfterWrite = stopped;
 
     expect(stoppedBeforeWrite).toBe(false);
-    expect(stoppedAfterWrite).toBe(true);
     expect(storeResult).toMatch(/^(resolved|rejected)/);
+    expect(order).toEqual(["write-settled", "stop-resolved"]);
 
     // Stopped admissions reject; restart restores them.
     await expect(
