@@ -11,6 +11,7 @@ const lanceMocks = vi.hoisted(() => ({
   deleteRows: vi.fn(async () => ({ numDeletedRows: 1 })),
 }));
 
+// mock-isolation: close lifecycle tests drive an artificial delayed connect to deterministically race close against in-flight initialization; the real lancedb-runtime stays isolated so no actual database is opened.
 vi.mock("./lancedb-runtime.js", () => ({
   loadLanceDbModule: vi.fn(async () => ({
     connect: lanceMocks.connect,
