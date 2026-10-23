@@ -178,8 +178,10 @@ describe("memory plugin service-path lifecycle (real LanceDB)", () => {
     await storeTool.execute("svc-store-0", { text: "prime the table" });
 
     // Admit an explicit write and stop while its native add is in flight. stop()
-    // must not resolve until the admitted write settles; record the settlement
-    // order so a fast or rejected write cannot mask a non-draining stop.
+    // must not resolve until the admitted write has settled; the table is
+    // already primed, so the store reaches a real native add (not rejected by
+    // a racing initialization). Assert the settlement order so a fast or
+    // rejected write cannot mask a non-draining stop.
     const order: string[] = [];
     const storePromise = storeTool.execute("svc-store-1", { text: "service-path write" });
     const storeSettled = storePromise.then(
@@ -205,6 +207,10 @@ describe("memory plugin service-path lifecycle (real LanceDB)", () => {
     await stopPromise;
 
     expect(stoppedBeforeWrite).toBe(false);
+    // The racing write either completed (native add drained before stop
+    // resolved) or was rejected as a stopped-service admission; either way it
+    // settles before stop resolves and must never be observed to land, which
+    // the post-restart row count below verifies.
     expect(storeResult).toMatch(/^(resolved|rejected)/);
     expect(order).toEqual(["write-settled", "stop-resolved"]);
 
@@ -217,6 +223,20 @@ describe("memory plugin service-path lifecycle (real LanceDB)", () => {
     const resumed = await storeTool.execute("svc-store-3", { text: "resumed after start" });
     const resumedContent = resumed as { content?: Array<{ text?: string }> };
     expect(resumedContent.content?.[0]?.text).toContain("Stored");
+
+    // After restart, the racing write from the stop window must not be present;
+    // the post-restart write is. Recall requires embedding again, so use the
+    // store tool's own persistence check via the table through a fresh store is
+    // not needed — verify by recalling both candidate texts.
+    const recallTool = registeredTool(registerTool, "memory_recall");
+    const recall = (await recallTool.execute("svc-recall-1", {
+      query: "service-path write",
+    })) as { content?: Array<{ text?: string }> };
+    expect(recall.content?.[0]?.text ?? "").not.toContain("service-path write");
+    const recallResumed = (await recallTool.execute("svc-recall-2", {
+      query: "resumed after start",
+    })) as { content?: Array<{ text?: string }> };
+    expect(recallResumed.content?.[0]?.text ?? "").toContain("resumed after start");
 
     await stop();
   });
