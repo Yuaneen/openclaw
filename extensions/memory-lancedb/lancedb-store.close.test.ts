@@ -111,12 +111,14 @@ describe("MemoryDB close lifecycle is terminal", () => {
     // A later operation on the same instance starts a fresh lifecycle generation
     // instead of writing through a stale handle.
     lanceMocks.connect.mockResolvedValue(makeDbHandle());
-    await expect(db.store("beta", {
-      text: "after close",
-      vector: [0, 1, 0],
-      importance: 0.5,
-      category: "fact",
-    })).resolves.toMatchObject({ text: "after close" });
+    await expect(
+      db.store("beta", {
+        text: "after close",
+        vector: [0, 1, 0],
+        importance: 0.5,
+        category: "fact",
+      }),
+    ).resolves.toMatchObject({ text: "after close" });
     expect(lanceMocks.add).toHaveBeenCalledTimes(1);
   });
 
