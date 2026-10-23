@@ -84,6 +84,8 @@ export class MemoryDB {
   private db: LanceDB.Connection | null = null;
   private table: LanceDB.Table | null = null;
   private initPromise: Promise<void> | null = null;
+  private generation = 0;
+  private closingPromise: Promise<void> | null = null;
 
   constructor(
     private readonly dbPath: string,
@@ -92,23 +94,30 @@ export class MemoryDB {
   ) {}
 
   private async ensureInitialized(): Promise<void> {
+    // A close may be in flight (service stop): wait for it to settle so the
+    // handle publication below belongs to the current lifecycle generation.
+    if (this.closingPromise) {
+      await this.closingPromise;
+    }
     if (this.table) {
       // Retained handles need an explicit refresh to observe external commits.
       await this.table.checkoutLatest();
       return;
     }
     if (this.initPromise) {
-      return await this.initPromise;
+      await this.initPromise;
+      return;
     }
 
-    this.initPromise = this.doInitialize().catch((error: unknown) => {
+    const generation = this.generation;
+    this.initPromise = this.doInitialize(generation).catch((error: unknown) => {
       this.initPromise = null;
       throw error;
     });
-    return await this.initPromise;
+    await this.initPromise;
   }
 
-  private async doInitialize(): Promise<void> {
+  private async doInitialize(generation: number): Promise<void> {
     const lancedb = await loadLanceDbModule();
     const connectionOptions: LanceDB.ConnectionOptions = this.storageOptions
       ? { storageOptions: this.storageOptions }
@@ -127,6 +136,12 @@ export class MemoryDB {
         throw legacyMemorySchemaError();
       }
 
+      // The instance may have been closed while initialization was in flight.
+      // Never publish handles for a stale generation; the catch below releases
+      // the local handles instead.
+      if (generation !== this.generation) {
+        throw new Error("MemoryDB is closed during initialization");
+      }
       this.db = db;
       this.table = table;
     } catch (error) {
@@ -232,11 +247,43 @@ export class MemoryDB {
     return result.numDeletedRows > 0;
   }
 
-  close(): void {
-    this.table?.close();
-    this.db?.close();
-    this.table = null;
-    this.db = null;
-    this.initPromise = null;
+  async close(): Promise<void> {
+    // Bump the generation synchronously so any in-flight or new initialization
+    // cannot publish handles for the closing lifecycle.
+    this.generation += 1;
+    if (this.closingPromise) {
+      return this.closingPromise;
+    }
+    this.closingPromise = (async () => {
+      try {
+        if (this.initPromise) {
+          try {
+            await this.initPromise;
+          } catch {
+            // A failed or rejected initialization is still a settled lifecycle.
+          }
+        }
+      } finally {
+        const table = this.table;
+        const db = this.db;
+        // Clear the instance first so a throwing native close cannot leave the
+        // instance stuck on a rejected closingPromise or leaked handles.
+        this.table = null;
+        this.db = null;
+        this.initPromise = null;
+        this.closingPromise = null;
+        try {
+          table?.close();
+        } catch {
+          // Native close errors are surfaced by the next operation, not fatal here.
+        }
+        try {
+          db?.close();
+        } catch {
+          // Native close errors are surfaced by the next operation, not fatal here.
+        }
+      }
+    })();
+    await this.closingPromise;
   }
 }

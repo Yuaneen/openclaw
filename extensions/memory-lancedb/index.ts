@@ -696,7 +696,7 @@ export default definePluginEntry({
           await embeddings.close?.();
         } finally {
           autoCaptureSessions.clear();
-          db.close();
+          await db.close();
           memoryRecallCooldowns.clear();
           api.logger.info("memory-lancedb: stopped");
         }
