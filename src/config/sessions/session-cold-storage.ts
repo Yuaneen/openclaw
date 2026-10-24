@@ -23,7 +23,7 @@ import {
 } from "../../state/openclaw-state-db.paths.js";
 import { captureOpenClawStateReadWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import type { OpenClawConfig } from "../types.js";
-import { prunePublishedSessionArchivesByRetention } from "./session-accessor.sqlite-archive-store.js";
+import { cleanupSessionArchivesByRetention } from "./session-accessor.js";
 import { runSqliteTranscriptArchiveWorkerOperation } from "./session-accessor.sqlite-archive.js";
 import type {
   SessionTranscriptReadScope,
@@ -34,7 +34,6 @@ import { withSqliteReclamationAuthorization } from "./session-accessor.sqlite-re
 import { withSessionEntryWorker } from "./session-accessor.sqlite-replacement-worker.js";
 import {
   prepareSqliteTranscriptReadScope,
-  resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
@@ -577,21 +576,17 @@ async function applySessionArchiveRetention(params: {
     { reason: "deleted" as const, olderThanMs: params.retentionMs },
     { reason: "reset" as const, olderThanMs: params.retentionMs },
   ];
-  const { cleanupArchivedSessionTranscripts } =
-    await import("../../gateway/session-archive.runtime.js");
   for (const { databaseOptions, ownerStorePath } of params.stores) {
     params.assertCurrent();
-    const scope = {
-      agentId: databaseOptions.agentId,
-      env: databaseOptions.env ?? process.env,
-      path: databaseOptions.path ?? ownerStorePath,
-    };
-    await cleanupArchivedSessionTranscripts({
-      directories: [resolveSqliteTranscriptArchiveDirectory(scope)],
+    await cleanupSessionArchivesByRetention({
+      scope: {
+        agentId: databaseOptions.agentId,
+        env: databaseOptions.env ?? process.env,
+        path: databaseOptions.path ?? ownerStorePath,
+      },
       rules,
     });
     params.assertCurrent();
-    await prunePublishedSessionArchivesByRetention({ scope, rules });
   }
 }
 
