@@ -6,12 +6,8 @@ import {
   captureOpenClawAgentDatabaseExecution,
   supportsOpenClawAgentDatabaseExecution,
 } from "../../state/openclaw-agent-execution.js";
-import type { SessionArchivedTranscriptCleanupRule } from "./session-accessor.lifecycle-types.js";
 import { applyMemorySessionEntryCleanup } from "./session-accessor.memory-cleanup.js";
-import {
-  prunePublishedSessionArchivesByRetention,
-  publishSessionStateArchives,
-} from "./session-accessor.sqlite-archive-store.js";
+import { publishSessionStateArchives } from "./session-accessor.sqlite-archive-store.js";
 import type { MaterializedSessionStateDeletePlan } from "./session-accessor.sqlite-archive-types.js";
 import { materializeSessionStateDeletePlans } from "./session-accessor.sqlite-archive.js";
 import { withNativeSessionCommitContext } from "./session-accessor.sqlite-commit-context.js";
@@ -48,7 +44,6 @@ import {
   resolveSqliteTranscriptArchiveDirectory,
   toDatabaseOptions,
   withSqliteSessionDatabase,
-  type ResolvedSqliteReadScope,
 } from "./session-accessor.sqlite-scope.js";
 import {
   commitSessionLifecycleProjectionInWorker,
@@ -65,31 +60,6 @@ import { normalizeResolvedMaintenanceConfigInput } from "./store-maintenance.js"
 export { purgeDeletedAgentSessionEntries } from "./session-agent-purge.js";
 
 export { applySessionEntryExactReplacements as applySessionEntryReplacements } from "./session-accessor.sqlite-replacement-projection.js";
-
-/** Removes expired archive files, then prunes the rows whose files are gone. */
-export async function cleanupSessionArchivesByRetention(params: {
-  scope: Pick<ResolvedSqliteReadScope, "agentId" | "env" | "path">;
-  rules: SessionArchivedTranscriptCleanupRule[];
-  nowMs?: number;
-  directories?: readonly string[];
-}): Promise<void> {
-  const directories =
-    params.directories && params.directories.length > 0
-      ? [...params.directories]
-      : [resolveSqliteTranscriptArchiveDirectory(params.scope)];
-  const { cleanupArchivedSessionTranscripts } =
-    await import("../../gateway/session-archive.runtime.js");
-  await cleanupArchivedSessionTranscripts({
-    directories,
-    rules: params.rules,
-    nowMs: params.nowMs,
-  });
-  await prunePublishedSessionArchivesByRetention({
-    scope: params.scope,
-    rules: params.rules,
-    nowMs: params.nowMs,
-  });
-}
 
 /** Applies exact lifecycle removals/upserts through the selected session owner. */
 export async function applySessionEntryLifecycleMutation(
@@ -438,18 +408,6 @@ export async function applySessionEntryLifecycleMutation(
     const archivedTranscriptDirectories = uniqueStrings(
       archivedTranscripts.map((transcript) => path.dirname(transcript.archivedPath)),
     ).toSorted();
-    if (archivedTranscriptDirectories.length > 0 && params.cleanupArchivedTranscripts) {
-      try {
-        await cleanupSessionArchivesByRetention({
-          scope: resolved,
-          rules: params.cleanupArchivedTranscripts.rules,
-          nowMs: params.cleanupArchivedTranscripts.nowMs,
-          directories: archivedTranscriptDirectories,
-        });
-      } catch (error) {
-        captureArtifactCleanupError(error);
-      }
-    }
     return {
       beforeCount: committed.beforeCount,
       removedEntries: committed.removedSessionKeys.length,

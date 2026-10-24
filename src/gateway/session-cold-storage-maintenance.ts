@@ -16,9 +16,10 @@ type MaintenanceOwner = {
 const owners = new WeakMap<() => OpenClawConfig, MaintenanceOwner>();
 
 function hasTranscriptMaintenanceWork(config: OpenClawConfig): boolean {
+  const maintenance = resolveMaintenanceConfigFromInput(config.session?.maintenance);
   return (
     config.session?.maintenance?.coldStorage?.enabled === true ||
-    resolveMaintenanceConfigFromInput(config.session?.maintenance).resetArchiveRetentionMs != null
+    (maintenance.mode === "enforce" && maintenance.resetArchiveRetentionMs != null)
   );
 }
 

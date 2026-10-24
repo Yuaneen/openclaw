@@ -110,21 +110,10 @@ export async function createSessionColdStorageFixture(
   return { options, scope, database, snapshot, original };
 }
 
-export function maintenanceConfig(
-  storePath: string,
-  enabled = true,
-  afterDays = 30,
-  resetArchiveRetention?: string,
-) {
+export function maintenanceConfig(storePath: string, enabled = true, afterDays = 30) {
   const agents: AgentsConfig = { entries: { main: {} } };
   return {
     agents,
-    session: {
-      store: storePath,
-      maintenance: {
-        coldStorage: { enabled, afterDays },
-        ...(resetArchiveRetention === undefined ? {} : { resetArchiveRetention }),
-      },
-    },
+    session: { store: storePath, maintenance: { coldStorage: { enabled, afterDays } } },
   };
 }

@@ -23,7 +23,6 @@ import {
 } from "../../state/openclaw-state-db.paths.js";
 import { captureOpenClawStateReadWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import type { OpenClawConfig } from "../types.js";
-import { cleanupSessionArchivesByRetention } from "./session-accessor.js";
 import { runSqliteTranscriptArchiveWorkerOperation } from "./session-accessor.sqlite-archive.js";
 import type {
   SessionTranscriptReadScope,
@@ -56,6 +55,7 @@ import type {
 } from "./session-cold-storage.types.js";
 import { reclaimSqliteFreePages } from "./session-history-archive-pruning.js";
 import type { SessionSourceValidation } from "./session-source-authority.js";
+import { createSessionSourceConversationMatches } from "./session-source-conversation-matches.js";
 import { publishUnchangedSessionTranscriptReceipts } from "./session-transcript-authority.js";
 import { projectionLane } from "./session-transcript-worker-resources.js";
 import { withSessionHistoryWorkerDatabase } from "./session-transcript-worker-runtime.js";
@@ -96,21 +96,8 @@ async function runColdMutation(
   acceptSourceValidation?: SessionColdReadPreparation["acceptSourceValidation"],
 ): Promise<SessionColdMutationResult> {
   const sourceMatches =
-    plan.kind === "cold-restore"
-      ? plan.guard?.sources?.flatMap((source, index) =>
-          source.conversationAlternatives
-            ? [
-                {
-                  index,
-                  matches: new Int32Array(
-                    new SharedArrayBuffer(
-                      (source.conversationAlternatives.length + 1) * Int32Array.BYTES_PER_ELEMENT,
-                    ),
-                  ),
-                },
-              ]
-            : [],
-        )
+    plan.kind === "cold-restore" && plan.guard?.sources
+      ? createSessionSourceConversationMatches(plan.guard.sources)
       : undefined;
   return await withSqliteMutationWorkerLifetime(
     plan.databaseOptions,
@@ -567,29 +554,6 @@ export async function restoreSessionColdTranscript(
   });
 }
 
-async function applySessionArchiveRetention(params: {
-  stores: Awaited<ReturnType<typeof prepareSessionColdStorageTargets>>["stores"];
-  retentionMs: number;
-  assertCurrent: () => void;
-}): Promise<void> {
-  const rules = [
-    { reason: "deleted" as const, olderThanMs: params.retentionMs },
-    { reason: "reset" as const, olderThanMs: params.retentionMs },
-  ];
-  for (const { databaseOptions, ownerStorePath } of params.stores) {
-    params.assertCurrent();
-    await cleanupSessionArchivesByRetention({
-      scope: {
-        agentId: databaseOptions.agentId,
-        env: databaseOptions.env ?? process.env,
-        path: databaseOptions.path ?? ownerStorePath,
-      },
-      rules,
-    });
-    params.assertCurrent();
-  }
-}
-
 export async function runSessionColdStorageMaintenance(params: {
   config: OpenClawConfig;
   assertCurrent?: () => void;
@@ -600,49 +564,57 @@ export async function runSessionColdStorageMaintenance(params: {
     externalizedTranscripts: 0,
   };
   const config = params.config.session?.maintenance?.coldStorage;
-  const archiveRetentionMs = resolveMaintenanceConfigFromInput(
-    params.config.session?.maintenance,
-  ).resetArchiveRetentionMs;
-  if (!config?.enabled && archiveRetentionMs == null) {
+  const maintenance = resolveMaintenanceConfigFromInput(params.config.session?.maintenance);
+  const retentionMs = maintenance.mode === "enforce" ? maintenance.resetArchiveRetentionMs : null;
+  if (!config?.enabled && retentionMs == null) {
     return result;
   }
+  const nowMs = Date.now();
+  const beforeMs = nowMs - (config?.afterDays ?? 30) * 24 * 60 * 60 * 1000;
   const { stores, assertCurrent } = await prepareSessionColdStorageTargets(
     params.config,
     params.assertCurrent,
   );
   assertCurrent();
-  if (config?.enabled) {
-    const beforeMs = Date.now() - (config.afterDays ?? 30) * 24 * 60 * 60 * 1000;
-    const start = stores.length ? nextStore % stores.length : 0;
-    nextStore = start + 1;
-    let remainingTranscripts = MAX_TRANSCRIPTS_PER_PASS;
-    let remainingBytes = MAX_BATCH_BYTES;
-    for (const { databaseOptions, ownerStorePath } of [
-      ...stores.slice(start),
-      ...stores.slice(0, start),
-    ]) {
-      if (remainingTranscripts <= 0 || remainingBytes <= 0) {
-        break;
-      }
-      assertCurrent();
-      const batch = await archiveSessionColdBatch({
-        databaseOptions,
-        ownerStorePath,
-        beforeMs,
-        maxTranscripts: remainingTranscripts,
-        maxBytes: remainingBytes,
+  const start = stores.length ? nextStore % stores.length : 0;
+  nextStore = start + 1;
+  let remainingTranscripts = MAX_TRANSCRIPTS_PER_PASS;
+  let remainingBytes = MAX_BATCH_BYTES;
+  for (const { databaseOptions, ownerStorePath } of [
+    ...stores.slice(start),
+    ...stores.slice(0, start),
+  ]) {
+    if (retentionMs != null) {
+      const { prunePublishedSessionArchivesByRetention } =
+        await import("./session-accessor.sqlite-archive-store.js");
+      await prunePublishedSessionArchivesByRetention({
+        scope: databaseOptions,
+        rules: [
+          { reason: "deleted", olderThanMs: retentionMs },
+          { reason: "reset", olderThanMs: retentionMs },
+        ],
+        nowMs,
         assertCurrent,
       });
-      assertCurrent();
-      result.archivedTranscripts += batch.archivedTranscripts;
-      result.externalizedTranscripts += batch.externalizedTranscripts;
-      remainingTranscripts -= batch.attemptedTranscripts;
-      remainingBytes -= batch.envelopeBytes;
-      params.onProgress?.({ ...result });
     }
-  }
-  if (archiveRetentionMs != null) {
-    await applySessionArchiveRetention({ stores, retentionMs: archiveRetentionMs, assertCurrent });
+    if (!config?.enabled || remainingTranscripts <= 0 || remainingBytes <= 0) {
+      continue;
+    }
+    assertCurrent();
+    const batch = await archiveSessionColdBatch({
+      databaseOptions,
+      ownerStorePath,
+      beforeMs,
+      maxTranscripts: remainingTranscripts,
+      maxBytes: remainingBytes,
+      assertCurrent,
+    });
+    assertCurrent();
+    result.archivedTranscripts += batch.archivedTranscripts;
+    result.externalizedTranscripts += batch.externalizedTranscripts;
+    remainingTranscripts -= batch.attemptedTranscripts;
+    remainingBytes -= batch.envelopeBytes;
+    params.onProgress?.({ ...result });
   }
   return result;
 }

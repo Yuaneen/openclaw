@@ -5,6 +5,10 @@
  * Runtime callers import this barrel instead of storage-specific modules.
  */
 export * from "./session-history.js";
+export {
+  listSessionTranscriptInstances,
+  listSessionTranscriptArchivesReadOnly,
+} from "./session-history-read.js";
 export { readSessionPendingInputReceiptsInWorker as listSessionPendingInputReceipts } from "./session-pending-input-receipts.js";
 export {
   bindSessionPendingInputSources,
@@ -44,7 +48,6 @@ export type {
   SessionAbortTargetIdentity,
   SessionAbortTargetResult,
   SessionAccessScope,
-  SessionArchivedTranscriptCleanupRule,
   SessionMessageCutMutationParams,
   SessionMessageCutMutationResult,
   SessionBranchListParams,
@@ -208,7 +211,6 @@ export {
   rollbackAgentHarnessSessionEntryLifecycle,
   rollbackPluginOwnedSessionEntryLifecycle,
 } from "./session-accessor.lifecycle.js";
-export { cleanupSessionArchivesByRetention } from "./session-accessor.sqlite-projection.js";
 export { listSessionBranches } from "./session-accessor.sqlite-branch-list.js";
 export {
   forkSessionAtMessage,

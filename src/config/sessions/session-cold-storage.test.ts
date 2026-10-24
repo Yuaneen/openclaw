@@ -216,60 +216,87 @@ async function embedFixtureArchive(fixture: Fixture) {
 }
 
 describe("cold transcript storage workers", () => {
-  it("applies archive retention without enabling cold storage", async () => {
-    const fixture = await createFixture();
-    const now = Date.now();
-    const expiredAt = now - 2 * 60 * 60 * 1000;
-    const expiredName = `${historicalId}.jsonl.deleted.${formatSessionArchiveTimestamp(expiredAt)}`;
-    const freshName = `${currentId}.jsonl.deleted.${formatSessionArchiveTimestamp(now)}`;
-    const archiveDirectory = resolveSqliteTranscriptArchiveDirectory({
-      agentId: "main",
-      env: process.env,
-      path: fixture.options.path,
-    });
-    await fs.mkdir(archiveDirectory, { recursive: true });
-    for (const [sessionId, archiveName, createdAt] of [
-      [historicalId, expiredName, expiredAt],
-      [currentId, freshName, now],
-    ] as const) {
-      await fs.writeFile(path.join(archiveDirectory, archiveName), "archive");
-      fixture
-        .database()
-        .prepare(
-          `INSERT INTO session_transcript_archives (
+  it.each([
+    ["enforce", "1h", true],
+    ["warn", "1h", false],
+    ["enforce", false, false],
+  ] as const)(
+    "expires archives without cron or cold storage (mode=%s, retention=%s)",
+    async (mode, retention, expires) => {
+      const fixture = await createFixture();
+      const now = Date.parse("2026-10-01T00:00:00.000Z");
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      await replaceSessionEntry(fixture.scope, {
+        sessionId: currentId,
+        previousSessionId: historicalId,
+        updatedAt: now,
+      });
+      const expiredAt = now - 2 * 60 * 60 * 1000;
+      const directory = resolveSqliteTranscriptArchiveDirectory(fixture.options);
+      await fs.mkdir(directory, { recursive: true });
+      const archives = [
+        ["expired-delete", "deleted", expiredAt, expiredAt],
+        ["expired-reset", "reset", expiredAt, expiredAt],
+        ["fresh", "deleted", now, now],
+        [historicalId, "reset", expiredAt, expiredAt],
+        ["pending", "reset", expiredAt, null],
+      ] as const;
+      const names = new Map<string, string>();
+      for (const [sessionId, reason, createdAt, publishedAt] of archives) {
+        const name = `${sessionId}.jsonl.${reason}.${formatSessionArchiveTimestamp(createdAt)}`;
+        names.set(sessionId, name);
+        await fs.writeFile(path.join(directory, name), "archive");
+        fixture
+          .database()
+          .prepare(`INSERT INTO session_transcript_archives (
             session_id, session_key, generation, archive_name, archive_sha256,
             encoding, reason, created_at, published_at, archive_blob
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          sessionId,
-          `agent:main:${sessionId}`,
-          "retention-generation",
-          archiveName,
-          createHash("sha256").update("archive").digest("hex"),
-          "identity",
-          "deleted",
-          createdAt,
-          createdAt,
-          Buffer.from("archive"),
-        );
-    }
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(
+            sessionId,
+            `agent:main:${sessionId}`,
+            "retention-generation",
+            name,
+            createHash("sha256").update("archive").digest("hex"),
+            "identity",
+            reason,
+            createdAt,
+            publishedAt,
+            Buffer.from("archive"),
+          );
+      }
+      const legacyName = `legacy.jsonl.deleted.${formatSessionArchiveTimestamp(expiredAt)}`;
+      await fs.writeFile(path.join(directory, legacyName), "legacy archive");
 
-    await runSessionColdStorageMaintenance({
-      config: maintenanceConfig(fixture.scope.storePath, false, 30, "1h"),
-    });
+      await runSessionColdStorageMaintenance({
+        config: {
+          agents: { entries: { main: {} } },
+          cron: { enabled: false },
+          session: {
+            store: fixture.scope.storePath,
+            maintenance: {
+              mode,
+              resetArchiveRetention: retention,
+              maxDiskBytes: false,
+              coldStorage: { enabled: false },
+            },
+          },
+        },
+      });
 
-    expect(
-      fixture
-        .database()
-        .prepare("SELECT archive_name FROM session_transcript_archives ORDER BY archive_name")
-        .all(),
-    ).toEqual([{ archive_name: freshName }]);
-    await expect(fs.stat(path.join(archiveDirectory, expiredName))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(fs.stat(path.join(archiveDirectory, freshName))).resolves.toBeDefined();
-  });
+      const expected = expires
+        ? ["fresh", historicalId, "pending"]
+        : ["expired-delete", "expired-reset", "fresh", historicalId, "pending"];
+      expect(
+        rows(fixture, "SELECT session_id FROM session_transcript_archives ORDER BY session_id"),
+      ).toEqual(expected.toSorted().map((session_id) => ({ session_id })));
+      const files = await fs.readdir(directory);
+      for (const [id, name] of names) {
+        expect(files.includes(name), id).toBe(expected.includes(id));
+      }
+      expect(files.includes(legacyName)).toBe(!expires);
+    },
+  );
 
   it("bounds aggregate archive bytes per pass and continues with the remaining large transcript", async () => {
     const root = tempDirs.make("openclaw-cold-byte-budget-");
