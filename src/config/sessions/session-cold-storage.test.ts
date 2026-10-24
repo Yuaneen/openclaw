@@ -31,7 +31,7 @@ import {
 } from "../../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import { formatSessionArchiveTimestamp } from "./artifacts.js";
-import { replaceSessionEntry } from "./session-accessor.js";
+import { replaceSessionEntry, replaceSessionEntrySync } from "./session-accessor.js";
 import * as archiveWorkers from "./session-accessor.sqlite-archive.js";
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
 import { planSessionStateDeleteIfUnreferenced } from "./session-accessor.sqlite-delete-snapshot.js";
@@ -226,7 +226,7 @@ describe("cold transcript storage workers", () => {
       const fixture = await createFixture();
       const now = Date.parse("2026-10-01T00:00:00.000Z");
       vi.spyOn(Date, "now").mockReturnValue(now);
-      await replaceSessionEntry(fixture.scope, {
+      replaceSessionEntrySync(fixture.scope, {
         sessionId: currentId,
         previousSessionId: historicalId,
         updatedAt: now,
