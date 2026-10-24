@@ -30,6 +30,7 @@ import {
   closeOpenClawStateDatabaseByPathAsync,
 } from "../../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
+import { formatSessionArchiveTimestamp } from "./artifacts.js";
 import { replaceSessionEntry } from "./session-accessor.js";
 import * as archiveWorkers from "./session-accessor.sqlite-archive.js";
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
@@ -41,6 +42,7 @@ import {
   loadTranscriptHeaderSync,
   readTranscriptStatsSync,
 } from "./session-accessor.sqlite-read.js";
+import { resolveSqliteTranscriptArchiveDirectory } from "./session-accessor.sqlite-scope.js";
 import { readTranscriptContextVersionInTransaction } from "./session-accessor.sqlite-transcript-state.js";
 import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
 import { appendTranscriptEvent } from "./session-accessor.sqlite-transcript-write.js";
@@ -214,6 +216,61 @@ async function embedFixtureArchive(fixture: Fixture) {
 }
 
 describe("cold transcript storage workers", () => {
+  it("applies archive retention without enabling cold storage", async () => {
+    const fixture = await createFixture();
+    const now = Date.now();
+    const expiredAt = now - 2 * 60 * 60 * 1000;
+    const expiredName = `${historicalId}.jsonl.deleted.${formatSessionArchiveTimestamp(expiredAt)}`;
+    const freshName = `${currentId}.jsonl.deleted.${formatSessionArchiveTimestamp(now)}`;
+    const archiveDirectory = resolveSqliteTranscriptArchiveDirectory({
+      agentId: "main",
+      env: process.env,
+      path: fixture.options.path,
+    });
+    await fs.mkdir(archiveDirectory, { recursive: true });
+    for (const [sessionId, archiveName, createdAt] of [
+      [historicalId, expiredName, expiredAt],
+      [currentId, freshName, now],
+    ] as const) {
+      await fs.writeFile(path.join(archiveDirectory, archiveName), "archive");
+      fixture
+        .database()
+        .prepare(
+          `INSERT INTO session_transcript_archives (
+            session_id, session_key, generation, archive_name, archive_sha256,
+            encoding, reason, created_at, published_at, archive_blob
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          sessionId,
+          `agent:main:${sessionId}`,
+          "retention-generation",
+          archiveName,
+          createHash("sha256").update("archive").digest("hex"),
+          "identity",
+          "deleted",
+          createdAt,
+          createdAt,
+          Buffer.from("archive"),
+        );
+    }
+
+    await runSessionColdStorageMaintenance({
+      config: maintenanceConfig(fixture.scope.storePath, false, 30, "1h"),
+    });
+
+    expect(
+      fixture
+        .database()
+        .prepare("SELECT archive_name FROM session_transcript_archives ORDER BY archive_name")
+        .all(),
+    ).toEqual([{ archive_name: freshName }]);
+    await expect(fs.stat(path.join(archiveDirectory, expiredName))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(fs.stat(path.join(archiveDirectory, freshName))).resolves.toBeDefined();
+  });
+
   it("bounds aggregate archive bytes per pass and continues with the remaining large transcript", async () => {
     const root = tempDirs.make("openclaw-cold-byte-budget-");
     const storePath = path.join(root, "agents", "main", "agent", "openclaw-agent.sqlite");

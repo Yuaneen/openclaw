@@ -23,6 +23,7 @@ import {
 } from "../../state/openclaw-state-db.paths.js";
 import { captureOpenClawStateReadWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import type { OpenClawConfig } from "../types.js";
+import { prunePublishedSessionArchivesByRetention } from "./session-accessor.sqlite-archive-store.js";
 import { runSqliteTranscriptArchiveWorkerOperation } from "./session-accessor.sqlite-archive.js";
 import type {
   SessionTranscriptReadScope,
@@ -33,6 +34,7 @@ import { withSqliteReclamationAuthorization } from "./session-accessor.sqlite-re
 import { withSessionEntryWorker } from "./session-accessor.sqlite-replacement-worker.js";
 import {
   prepareSqliteTranscriptReadScope,
+  resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
@@ -63,6 +65,7 @@ import {
   SessionTranscriptWriterClaimReboundError,
 } from "./session-transcript-writer-claim-error.js";
 import { normalizeStoreSessionKey } from "./store-entry.js";
+import { resolveMaintenanceConfigFromInput } from "./store-maintenance.js";
 import { captureSessionTranscriptStorageEnvironment } from "./transcript-target-binding.js";
 
 const operations = new Map<string, StoreWriterQueue>();
@@ -565,6 +568,33 @@ export async function restoreSessionColdTranscript(
   });
 }
 
+async function applySessionArchiveRetention(params: {
+  stores: Awaited<ReturnType<typeof prepareSessionColdStorageTargets>>["stores"];
+  retentionMs: number;
+  assertCurrent: () => void;
+}): Promise<void> {
+  const rules = [
+    { reason: "deleted" as const, olderThanMs: params.retentionMs },
+    { reason: "reset" as const, olderThanMs: params.retentionMs },
+  ];
+  const { cleanupArchivedSessionTranscripts } =
+    await import("../../gateway/session-archive.runtime.js");
+  for (const { databaseOptions, ownerStorePath } of params.stores) {
+    params.assertCurrent();
+    const scope = {
+      agentId: databaseOptions.agentId,
+      env: databaseOptions.env ?? process.env,
+      path: databaseOptions.path ?? ownerStorePath,
+    };
+    await cleanupArchivedSessionTranscripts({
+      directories: [resolveSqliteTranscriptArchiveDirectory(scope)],
+      rules,
+    });
+    params.assertCurrent();
+    await prunePublishedSessionArchivesByRetention({ scope, rules });
+  }
+}
+
 export async function runSessionColdStorageMaintenance(params: {
   config: OpenClawConfig;
   assertCurrent?: () => void;
@@ -575,41 +605,49 @@ export async function runSessionColdStorageMaintenance(params: {
     externalizedTranscripts: 0,
   };
   const config = params.config.session?.maintenance?.coldStorage;
-  if (!config?.enabled) {
+  const archiveRetentionMs = resolveMaintenanceConfigFromInput(
+    params.config.session?.maintenance,
+  ).resetArchiveRetentionMs;
+  if (!config?.enabled && archiveRetentionMs == null) {
     return result;
   }
-  const beforeMs = Date.now() - (config.afterDays ?? 30) * 24 * 60 * 60 * 1000;
   const { stores, assertCurrent } = await prepareSessionColdStorageTargets(
     params.config,
     params.assertCurrent,
   );
   assertCurrent();
-  const start = stores.length ? nextStore % stores.length : 0;
-  nextStore = start + 1;
-  let remainingTranscripts = MAX_TRANSCRIPTS_PER_PASS;
-  let remainingBytes = MAX_BATCH_BYTES;
-  for (const { databaseOptions, ownerStorePath } of [
-    ...stores.slice(start),
-    ...stores.slice(0, start),
-  ]) {
-    if (remainingTranscripts <= 0 || remainingBytes <= 0) {
-      break;
+  if (config?.enabled) {
+    const beforeMs = Date.now() - (config.afterDays ?? 30) * 24 * 60 * 60 * 1000;
+    const start = stores.length ? nextStore % stores.length : 0;
+    nextStore = start + 1;
+    let remainingTranscripts = MAX_TRANSCRIPTS_PER_PASS;
+    let remainingBytes = MAX_BATCH_BYTES;
+    for (const { databaseOptions, ownerStorePath } of [
+      ...stores.slice(start),
+      ...stores.slice(0, start),
+    ]) {
+      if (remainingTranscripts <= 0 || remainingBytes <= 0) {
+        break;
+      }
+      assertCurrent();
+      const batch = await archiveSessionColdBatch({
+        databaseOptions,
+        ownerStorePath,
+        beforeMs,
+        maxTranscripts: remainingTranscripts,
+        maxBytes: remainingBytes,
+        assertCurrent,
+      });
+      assertCurrent();
+      result.archivedTranscripts += batch.archivedTranscripts;
+      result.externalizedTranscripts += batch.externalizedTranscripts;
+      remainingTranscripts -= batch.attemptedTranscripts;
+      remainingBytes -= batch.envelopeBytes;
+      params.onProgress?.({ ...result });
     }
-    assertCurrent();
-    const batch = await archiveSessionColdBatch({
-      databaseOptions,
-      ownerStorePath,
-      beforeMs,
-      maxTranscripts: remainingTranscripts,
-      maxBytes: remainingBytes,
-      assertCurrent,
-    });
-    assertCurrent();
-    result.archivedTranscripts += batch.archivedTranscripts;
-    result.externalizedTranscripts += batch.externalizedTranscripts;
-    remainingTranscripts -= batch.attemptedTranscripts;
-    remainingBytes -= batch.envelopeBytes;
-    params.onProgress?.({ ...result });
+  }
+  if (archiveRetentionMs != null) {
+    await applySessionArchiveRetention({ stores, retentionMs: archiveRetentionMs, assertCurrent });
   }
   return result;
 }

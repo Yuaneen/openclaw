@@ -90,6 +90,14 @@ it("picks up enabled and changed age settings without recreating the scheduler",
   expect(sweep).not.toHaveBeenCalled();
   expect(() => requestGatewaySessionColdStorageMaintenance(getRuntimeConfig)).toThrow("disabled");
 
+  config = {
+    session: {
+      maintenance: { coldStorage: { enabled: false }, resetArchiveRetention: "1h" },
+    },
+  };
+  await clock.advanceBy(60_000);
+  expect(sweep).toHaveBeenCalledTimes(1);
+
   config = { session: { maintenance: { coldStorage: { enabled: true, afterDays: 30 } } } };
   await clock.advanceBy(60_000);
   expect(sweep).toHaveBeenLastCalledWith(expect.objectContaining({ config }));
@@ -104,7 +112,14 @@ it("picks up enabled and changed age settings without recreating the scheduler",
   expect(sweep).toHaveBeenLastCalledWith(expect.objectContaining({ config }));
   config = { session: { maintenance: { coldStorage: { enabled: false } } } };
   await clock.advanceBy(60_000);
-  expect(sweep).toHaveBeenCalledTimes(2);
+  expect(sweep).toHaveBeenCalledTimes(3);
+});
+
+it("allows manual maintenance when only archive retention is configured", async () => {
+  config = { session: { maintenance: { resetArchiveRetention: "1h" } } };
+  expect(() => requestGatewaySessionColdStorageMaintenance(getRuntimeConfig)).not.toThrow();
+  await maintenance.run();
+  expect(sweep).toHaveBeenCalledOnce();
 });
 
 it.each([
