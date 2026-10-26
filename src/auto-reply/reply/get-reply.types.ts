@@ -141,6 +141,8 @@ type InternalReplySessionOptions = {
   onReplyOperationAdmitted?: (operation: ReplyOperation) => void;
   /** Return true only when the caller accepts settlement custody for this exact operation. */
   onReplyOperationOwned?: (operation: ReplyOperation) => boolean | void;
+  /** Preserve the visible tool schemas while allowing execution only for these names. */
+  toolExecutionAllow?: readonly string[];
   skillOverrides?: SessionToolOverrides["skills"];
   skillLibraryAuthoring?: import("../../skills/library/authoring.js").SkillLibraryAuthoringCapability;
 };

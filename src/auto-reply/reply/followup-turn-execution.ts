@@ -215,6 +215,7 @@ export async function executeFollowupTurn(params: {
     operatorAuthority: turn.queued.operatorAuthority,
     abortSignal: turn.operation.abortSignal,
     toolsAllow: turn.queued.toolsAllow,
+    toolExecutionAllow: turn.queued.toolExecutionAllow,
     disableTools: turn.queued.disableTools,
     forceRestartSafeTools: turn.queued.forceRestartSafeTools,
     forceCodeModeTools: turn.queued.forceCodeModeTools,

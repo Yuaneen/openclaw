@@ -134,6 +134,8 @@ export type FollowupRunPayload = {
   summaryLine?: string;
   /** Turn-owned tool authority captured before queue ownership transfers. */
   toolsAllow?: string[];
+  /** Preserve the visible tool schemas while allowing execution only for these names. */
+  toolExecutionAllow?: readonly string[];
   disableTools?: boolean;
   forceRestartSafeTools?: boolean;
   forceCodeModeTools?: boolean;

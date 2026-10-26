@@ -61,7 +61,11 @@ export function resolveStrandedReplyRecovery(params: {
       summaryLine: STRANDED_REPLY_RETRY_MARKER,
       strandedReplyRetry: true,
       disableCollectBatching: true,
-      toolsAllow: isRuntimeToolAllowed("message", params.base.toolsAllow) ? ["message"] : [],
+      // The retry keeps the session's normal prompt and tool declarations so the
+      // provider request stays byte-stable; only execution is capped to `message`.
+      toolExecutionAllow: isRuntimeToolAllowed("message", params.base.toolsAllow)
+        ? ["message"]
+        : [],
       transcriptPrompt: undefined,
       userTurnTranscriptRecorder: undefined,
       currentInboundContext: undefined,

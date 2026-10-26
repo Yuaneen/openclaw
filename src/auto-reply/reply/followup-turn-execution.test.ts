@@ -103,6 +103,15 @@ describe("executeFollowupTurn", () => {
     });
   });
 
+  it("carries a queued execution-only cap without narrowing the tool surface", async () => {
+    const turn = createTurn();
+    turn.queued.toolExecutionAllow = ["message"];
+    await executeTestTurn({ turn });
+    const opts = state.execute.mock.calls[0]?.[0]?.opts;
+    expect(opts?.toolExecutionAllow).toEqual(["message"]);
+    expect(opts?.toolsAllow).toBeUndefined();
+  });
+
   it("records preflight failure on source receipts without changing newer runner state", async () => {
     const receipts: ReplyOperationRunState[] = [{}, {}];
     const newerReceipt: ReplyOperationRunState = {};

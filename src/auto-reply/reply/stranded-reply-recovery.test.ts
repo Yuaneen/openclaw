@@ -135,10 +135,12 @@ describe("resolveStrandedReplyRecovery", () => {
       expect(recovery.run).toMatchObject({
         strandedReplyRetry: true,
         disableCollectBatching: true,
-        toolsAllow: expected,
+        // Tool declarations stay byte-identical to the interrupted turn; only execution is capped.
+        toolExecutionAllow: expected,
         run: { suppressNextUserMessagePersistence: true },
         transcriptPrompt: undefined,
       });
+      expect(recovery.run.toolsAllow).toBe(toolsAllow);
     }
   });
 

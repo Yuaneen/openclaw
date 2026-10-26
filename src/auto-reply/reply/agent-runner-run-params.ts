@@ -191,6 +191,7 @@ export function buildFallbackCandidateTurnParams(params: AgentFallbackCandidateC
     onUserMessagePersisted: params.notifyUserMessagePersisted,
     prepareAssistantTranscriptMessage: turn.opts?.prepareAssistantTranscriptMessage,
     toolsAllow: turn.opts?.toolsAllow,
+    toolExecutionAllow: turn.opts?.toolExecutionAllow,
     disableTools: turn.opts?.disableTools,
     forceRestartSafeTools: turn.opts?.forceRestartSafeTools,
     forceCodeModeTools: turn.opts?.forceCodeModeTools,
