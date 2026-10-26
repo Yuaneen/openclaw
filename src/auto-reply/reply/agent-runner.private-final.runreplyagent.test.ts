@@ -208,6 +208,7 @@ describe("runReplyAgent stranded message_tool_only finals (#85714)", () => {
             opts: {
               runId,
               toolsAllow: queuedRun.toolsAllow,
+              toolExecutionAllow: queuedRun.toolExecutionAllow,
 
               onDeliberateSilentTerminalReply: params.onDeliberateSilentTerminalReply,
               onObservedReplyDelivery: params.onObservedReplyDelivery,
@@ -336,7 +337,9 @@ describe("runReplyAgent stranded message_tool_only finals (#85714)", () => {
       expect(retryRun.userTurnTranscriptRecorder).toBeUndefined();
       expect(retryRun.currentInboundContext).toBeUndefined();
       expect(retryRun.disableCollectBatching).toBe(true);
-      expect(retryRun.toolsAllow).toEqual(["message"]);
+      // The declared surface stays as the interrupted turn left it; only execution is capped.
+      expect(retryRun.toolsAllow).toEqual(["message", "read"]);
+      expect(retryRun.toolExecutionAllow).toEqual(["message"]);
       expect(retryRun.run).toMatchObject({
         config: initial.followupRun.run.config,
         extraSystemPrompt: initial.followupRun.run.extraSystemPrompt,
@@ -358,7 +361,8 @@ describe("runReplyAgent stranded message_tool_only finals (#85714)", () => {
       expect(runEmbeddedAgentMock).toHaveBeenCalledTimes(2);
       expect(runEmbeddedAgentMock.mock.calls[1]?.[0]).toMatchObject({
         prompt: retryRun.prompt,
-        toolsAllow: ["message"],
+        toolsAllow: ["message", "read"],
+        toolExecutionAllow: ["message"],
         extraSystemPrompt: initial.followupRun.run.extraSystemPrompt,
         sourceReplyDeliveryMode: "message_tool_only",
         suppressNextUserMessagePersistence: true,
