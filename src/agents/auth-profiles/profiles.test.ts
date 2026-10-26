@@ -1048,4 +1048,30 @@ describe("setAuthProfileOrder", () => {
       expect(updated?.order?.openai ?? null).toBeNull();
       expect(loadPersisted(agentDir)?.order?.openai ?? null).toBeNull();
     }, true));
+
+  it("rejects a dangling order when a locally owned profile is removed concurrently", () =>
+    withProfileState(async ({ agentDir }) => {
+      fs.mkdirSync(agentDir, { recursive: true });
+      saveProfile("anthropic:synthetic", apiKey("anthropic", "sk-synthetic"), agentDir, {
+        order: { anthropic: ["anthropic:synthetic"] },
+      });
+
+      // Simulate a concurrent logout between the caller's pre-lock validation and commit.
+      await removeProviderAuthProfilesWithLock({
+        agentDir,
+        provider: "anthropic",
+        profileIds: ["anthropic:synthetic"],
+      });
+
+      await expect(
+        setAuthProfileOrder({
+          agentDir,
+          provider: "anthropic",
+          order: ["anthropic:synthetic"],
+        }),
+      ).rejects.toThrow(/no longer exists/);
+
+      // The rejection must not persist an order that references the removed profile.
+      expect(loadPersisted(agentDir)?.order?.anthropic ?? null).toBeNull();
+    }, true));
 });

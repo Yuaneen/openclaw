@@ -104,9 +104,22 @@ export async function setAuthProfileOrder(params: {
     sharedStoreWrite: params.sharedStoreWrite,
     // Keep inherited IDs in local order; pruning them silently undoes the requested switch.
     ...(order ? { saveOptions: { preserveOrderProfileIds: order } } : {}),
-    updater: (store) => {
+    updater: (store, _owner, sharedStore) => {
       if (!order && listProviderAuthStateEntries(store.order, providerKey).length === 0) {
         return false;
+      }
+      // Re-validate under the lock: a concurrent logout may have removed a requested
+      // profile after the caller's pre-lock check. Inherited main-store IDs stay valid (#119233).
+      if (order) {
+        for (const profileId of order) {
+          const stillPresent = Object.hasOwn(store.profiles, profileId);
+          const inherited = sharedStore ? Object.hasOwn(sharedStore.profiles, profileId) : false;
+          if (!stillPresent && !inherited) {
+            throw new Error(
+              `Auth profile "${profileId}" no longer exists; refusing to persist a dangling auth order.`,
+            );
+          }
+        }
       }
       store.order = replaceProviderAuthState(store.order, providerKey, order);
       return true;
