@@ -62,6 +62,7 @@ export type RunCliAgentParams = Pick<
   | "chatId"
   | "bashElevated"
   | "toolsAllow"
+  | "toolExecutionAllow"
   | "skillLibraryAuthoring"
   | "disableTrajectory"
 > & {

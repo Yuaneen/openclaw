@@ -98,6 +98,35 @@ it("preserves an exact tool cap when replacing native tools", async () => {
   await expectPolicy(request, { native: [], openClaw: ["message", "read"] });
 });
 
+it.each<{ name: string; params: Partial<RunCliAgentParams>; tools?: Tools; allow?: string[] }>([
+  {
+    name: "an uncapped parent",
+    params: { toolExecutionAllow: ["message"] },
+    tools: { native: [], openClaw: ["message"] },
+    allow: ["message"],
+  },
+  {
+    name: "a wider parent cap",
+    params: { toolsAllow: ["message", "exec"], toolExecutionAllow: ["message"] },
+    tools: { native: [], openClaw: ["message"] },
+    allow: ["message"],
+  },
+  { name: "an empty cap", params: { toolExecutionAllow: [] }, tools: emptyTools, allow: [] },
+  {
+    name: "an explicit wildcard cap",
+    params: { toolExecutionAllow: ["*"] },
+    tools: emptyTools,
+    allow: ["*"],
+  },
+])("enforces a send-only execution cap from $name", async ({ params, tools, allow }) => {
+  const { params: resolved, runtimeToolsAllowPolicy } = await resolveCliRuntimeToolPolicy(
+    makeInput({ params }, ordinary),
+  );
+  expect([resolved.cliToolAvailability, runtimeToolsAllowPolicy]).toEqual([tools, allow]);
+  expect(resolved.toolExecutionAllow).toBeUndefined();
+  expect(resolved.toolsAllow).toBeUndefined();
+});
+
 it("keeps backend-enforced tool-free questions independent of the file tool policy", async () => {
   await expectPolicy(
     makeInput(

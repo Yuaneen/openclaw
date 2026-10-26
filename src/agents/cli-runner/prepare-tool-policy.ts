@@ -34,6 +34,25 @@ export async function resolveCliRuntimeToolPolicy(input: {
   let { params } = input;
   let runtimeToolsAllowPolicy: string[] | undefined;
   let managedNativeTools: string[] = [];
+  // A send-only continuation keeps the session's declared surface but may run only the
+  // allowed tools. CLI backends have no separate presentation layer, so the execution cap
+  // has to narrow the mediated availability this owner derives.
+  if (params.toolExecutionAllow !== undefined) {
+    const executionAllow = params.toolExecutionAllow.map(normalizeToolPolicyName);
+    const toolsAllow = params.toolsAllow;
+    const inheritedWildcard =
+      toolsAllow === undefined ||
+      toolsAllow.some((toolName) => normalizeToolPolicyName(toolName) === "*");
+    params = {
+      ...params,
+      toolsAllow: executionAllow.includes("*")
+        ? toolsAllow
+        : inheritedWildcard
+          ? executionAllow
+          : expandToolGroups(toolsAllow).filter((toolName) => executionAllow.includes(toolName)),
+      toolExecutionAllow: undefined,
+    };
+  }
   if (params.toolsAllow !== undefined) {
     if (params.cliToolAvailability !== undefined) {
       throw new Error(`CLI backend ${input.backendId} received conflicting runtime tool policies`);
