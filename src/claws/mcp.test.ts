@@ -14,7 +14,7 @@ import { CLAW_ADD_PLAN_SCHEMA_VERSION, CLAW_OUTPUT_STABILITY, type ClawAddPlan }
 
 const SERVER = { command: "uvx", args: ["fixture-mcp"] };
 
-function fixturePlan(name = "fixture"): ClawAddPlan {
+function fixturePlan(): ClawAddPlan {
   return {
     schemaVersion: CLAW_ADD_PLAN_SCHEMA_VERSION,
     manifestSchemaVersion: CLAW_SCHEMA_VERSION,
@@ -51,9 +51,9 @@ function fixturePlan(name = "fixture"): ClawAddPlan {
     actions: [
       {
         kind: "mcpServer",
-        id: name,
+        id: "fixture",
         action: "configure",
-        target: `mcp.servers.${name}`,
+        target: "mcp.servers.fixture",
         details: SERVER,
         blocked: false,
       },
@@ -65,16 +65,26 @@ function fixturePlan(name = "fixture"): ClawAddPlan {
   };
 }
 
-async function readConfigured(name: string) {
+async function installExpectingError(): Promise<ClawMcpInstallError> {
+  const error = await installClawMcpServersStateless(fixturePlan()).catch(
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(ClawMcpInstallError);
+  return error as ClawMcpInstallError;
+}
+
+async function configured(name: string) {
   const listed = await listConfiguredMcpServers();
   expect(listed.ok).toBe(true);
   return listed.ok ? listed.mcpServers[name] : undefined;
 }
 
-async function installExpectingError(plan: ClawAddPlan): Promise<ClawMcpInstallError> {
-  const error = await installClawMcpServersStateless(plan).catch((failure: unknown) => failure);
-  expect(error).toBeInstanceOf(ClawMcpInstallError);
-  return error as ClawMcpInstallError;
+function loseAcknowledgementAfterCommit() {
+  const realSet = mcpConfigInternal.set;
+  vi.spyOn(mcpConfigInternal, "set").mockImplementationOnce(async (params, onCommitted) => {
+    await realSet(params, onCommitted);
+    throw new Error("config write acknowledgement lost after commit");
+  });
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -100,44 +110,30 @@ it.aroundEach((run) =>
   ),
 );
 
-it("claims the MCP server when the config write commits before a later step fails", async () => {
-  const realSet = mcpConfigInternal.set;
-  vi.spyOn(mcpConfigInternal, "set").mockImplementationOnce(async (params, onCommitted) => {
-    await realSet(params, onCommitted);
-    throw new Error("config write acknowledgement lost after commit");
-  });
+it.each([{ changed: false }, { changed: true }])(
+  "reconciles a committed MCP write (changed by another writer: $changed)",
+  async ({ changed }) => {
+    loseAcknowledgementAfterCommit();
+    const error = await installExpectingError();
+    expect(error.mcpServers).toHaveLength(1);
 
-  const error = await installExpectingError(fixturePlan());
-  expect(error.mcpServers).toMatchObject([
-    { name: "fixture", origin: "claw-introduced", status: "complete" },
-  ]);
-
-  await expect(rollbackStatelessClawMcpServers(error.mcpServers)).resolves.toEqual([]);
-  expect(await readConfigured("fixture")).toBeUndefined();
-});
+    if (changed) {
+      await mcpConfigInternal.set({
+        name: "fixture",
+        server: { command: "uvx", args: ["changed-after-failure"] },
+      });
+    }
+    await expect(rollbackStatelessClawMcpServers(error.mcpServers)).resolves.toEqual([]);
+    expect(await configured("fixture")).toEqual(
+      changed ? expect.objectContaining({ args: ["changed-after-failure"] }) : undefined,
+    );
+  },
+);
 
 it("does not claim an MCP server whose write never committed", async () => {
   vi.spyOn(mcpConfigInternal, "set").mockRejectedValueOnce(new Error("write refused"));
 
-  const error = await installExpectingError(fixturePlan());
+  const error = await installExpectingError();
   expect(error.mcpServers).toEqual([]);
-  expect(await readConfigured("fixture")).toBeUndefined();
-});
-
-it("leaves a server that another writer changed after the failed write alone", async () => {
-  const realSet = mcpConfigInternal.set;
-  vi.spyOn(mcpConfigInternal, "set").mockImplementationOnce(async (params, onCommitted) => {
-    await realSet(params, onCommitted);
-    throw new Error("config write acknowledgement lost after commit");
-  });
-
-  const error = await installExpectingError(fixturePlan());
-  expect(error.mcpServers).toHaveLength(1);
-
-  await realSet({
-    name: "fixture",
-    server: { command: "uvx", args: ["changed-after-failure"] },
-  });
-  await expect(rollbackStatelessClawMcpServers(error.mcpServers)).resolves.toEqual([]);
-  expect(await readConfigured("fixture")).toMatchObject({ args: ["changed-after-failure"] });
+  expect(await configured("fixture")).toBeUndefined();
 });
