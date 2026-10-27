@@ -191,6 +191,28 @@ it("retains exclusive custody across commits and rejects overlapping local owner
   other.exec("BEGIN IMMEDIATE; ROLLBACK");
 });
 
+it("reports absence for an existing empty bootstrap store and creates on the next write", () => {
+  const { env, run } = fixture();
+  const pathname = resolveClientCredentialStorePath(env);
+  fs.mkdirSync(path.dirname(pathname), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(pathname, "", { mode: 0o600 });
+
+  expect(run({ kind: "identity.read", identity_key: "node" })).toEqual({
+    kind: "identity",
+    identity: null,
+  });
+  expect(run({ kind: "identity.read", identity_key: "node" })).toEqual({
+    kind: "identity",
+    identity: null,
+  });
+
+  expect(run({ kind: "identity.create", identity })).toEqual({ kind: "identity", identity });
+  expect(run({ kind: "identity.read", identity_key: "node" })).toEqual({
+    kind: "identity",
+    identity,
+  });
+});
+
 it("refuses missing, incomplete and replaced-source receipts without opening shared state", () => {
   const { root, env, run } = fixture();
   fs.mkdirSync(path.join(root, "state"));

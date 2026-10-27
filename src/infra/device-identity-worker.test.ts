@@ -47,21 +47,23 @@ describe("device identity local worker", () => {
     });
   });
 
-  it("refuses an existing empty credential store without initializing it", async () => {
+  it("returns absence for an existing empty credential store without initializing it", async () => {
     await withIdentityWorkerState(async (options) => {
       const directory = path.dirname(options.path);
       await fs.mkdir(directory, { recursive: true, mode: 0o700 });
       await fs.writeFile(options.path, "", { mode: 0o600 });
       const artifacts = await fs.readdir(directory);
-      const fileMode = (await fs.stat(options.path)).mode;
 
-      await expect(loadDeviceIdentityIfPresentAsync(options)).rejects.toThrow(
-        "Client credential store is empty; run openclaw doctor --fix.",
-      );
+      expect(await loadDeviceIdentityIfPresentAsync(options)).toBeNull();
       expect(await loadChatRequestIdentityKeyAsync(options)).toBeNull();
 
-      expect(await fs.readFile(options.path)).toHaveLength(0);
-      expect((await fs.stat(options.path)).mode).toBe(fileMode);
+      // The lookup reports absence; only the next write initializes the schema.
+      const database = new DatabaseSync(options.path);
+      try {
+        expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 0 });
+      } finally {
+        database.close();
+      }
       expect(await fs.readdir(directory)).toEqual(artifacts);
     });
   });

@@ -193,6 +193,7 @@ export function openClientCredentialCustody(
     const cached = admittedFiles.get(custodyKey);
     let initialized = false;
     let needsMetadataUpgrade = false;
+    let emptyBootstrapSnapshot = false;
     transaction(() => {
       // Acquire custody before retaining locks so competing openers can release their shared locks.
       database.exec("PRAGMA locking_mode=EXCLUSIVE"); // sqlite-allow-raw -- Retain owner custody across operation commits.
@@ -207,7 +208,13 @@ export function openClientCredentialCustody(
           !database.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").get() // sqlite-allow-raw -- Bootstrap only an empty native catalog.
         ) {
           if (!createIfMissing) {
-            throw new Error("Client credential store is empty; run openclaw doctor --fix.");
+            if (options.migration) {
+              throw new Error("Client credential store is empty; run openclaw doctor --fix.");
+            }
+            // The store file is published before its schema transaction commits, so readers can
+            // observe this state: report absence and let the next writer initialize the schema.
+            emptyBootstrapSnapshot = true;
+            return;
           }
           database.exec(CLIENT_CREDENTIAL_SCHEMA_SQL); // sqlite-allow-raw -- Canonical first-use schema DDL.
           initialized = true;
@@ -237,6 +244,11 @@ export function openClientCredentialCustody(
         execute?.(database);
       }
     });
+    if (emptyBootstrapSnapshot) {
+      assertMissingClientCredentialStoreReady(env);
+      physicalClose();
+      return undefined;
+    }
     // First-use schema creation survives cancellation of the caller's row write.
     if (initialized && execute) {
       transaction(() => execute(database));
