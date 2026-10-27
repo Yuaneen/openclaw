@@ -221,6 +221,25 @@ describe("update global helpers", () => {
     expect(explicitEnv?.COREPACK_ENABLE_DOWNLOAD_PROMPT).toBe("1");
   });
 
+  it("probes package-manager roots with the same non-interactive policy", async () => {
+    envSnapshot = captureEnv(["COREPACK_ENABLE_DOWNLOAD_PROMPT"]);
+    process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "";
+    const runCommand = vi.fn(async () => commandResult(""));
+
+    await detectGlobalInstallManagerByPresence(runCommand, 1_000);
+
+    const probes = runCommand.mock.calls.map(([argv, options]) => ({ argv, options }));
+    expect(probes.map(({ argv }) => argv)).toEqual([
+      ["npm", "root", "-g"],
+      ["pnpm", "root", "-g"],
+    ]);
+    for (const { options } of probes) {
+      expect(options.env).toMatchObject({ COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" });
+      // Corepack prompts only on a TTY; a probe must never wait for terminal input.
+      expect(options.input).toBe("");
+    }
+  });
+
   it("sets the package launcher under Bun", async () => {
     vi.stubGlobal("process", { ...process, versions: { ...process.versions, bun: "1.4.3" } });
     expect((await createGlobalInstallEnv({}))?.OPENCLAW_PACKAGE_BUN_LAUNCHER).toBe(
