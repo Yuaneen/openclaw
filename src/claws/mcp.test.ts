@@ -123,3 +123,21 @@ it("does not claim an MCP server whose write never committed", async () => {
   expect(error.mcpServers).toEqual([]);
   expect(await readConfigured("fixture")).toBeUndefined();
 });
+
+it("leaves a server that another writer changed after the failed write alone", async () => {
+  const realSet = mcpConfigInternal.set;
+  vi.spyOn(mcpConfigInternal, "set").mockImplementationOnce(async (params, onCommitted) => {
+    await realSet(params, onCommitted);
+    throw new Error("config write acknowledgement lost after commit");
+  });
+
+  const error = await installExpectingError(fixturePlan());
+  expect(error.mcpServers).toHaveLength(1);
+
+  await realSet({
+    name: "fixture",
+    server: { command: "uvx", args: ["changed-after-failure"] },
+  });
+  await expect(rollbackStatelessClawMcpServers(error.mcpServers)).resolves.toEqual([]);
+  expect(await readConfigured("fixture")).toMatchObject({ args: ["changed-after-failure"] });
+});
