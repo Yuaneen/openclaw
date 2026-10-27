@@ -36,7 +36,7 @@ function fixturePlan(name = "fixture"): ClawAddPlan {
       requestedId: "main",
       finalId: "main",
       workspace: "/fixture/workspace",
-      config: { workspace: "/fixture/workspace" },
+      config: { id: "main", workspace: "/fixture/workspace" },
     },
     summary: {
       totalActions: 1,
