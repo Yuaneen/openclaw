@@ -5,6 +5,7 @@ import { getRuntimeConfig } from "../config/config.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import { deleteSessionEntryLifecycle } from "../config/sessions/session-accessor.js";
 import { withSessionEntryReadOnlyInWorker } from "../config/sessions/session-entry-read-runtime.js";
+import { isPinnableSessionEntry } from "../config/sessions/session-pin-policy.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { loadPendingSessionDeliveries } from "../infra/session-delivery-queue-storage.js";
@@ -77,6 +78,11 @@ export async function removeCronRunContinuationSessionIfIdle(
     );
   const original = await readEntry();
   if (!original || !canRemoveCronRunContinuation(original.cronRunContinuation)) {
+    return;
+  }
+  // Ordinary maintenance treats a pin as the operator's retention request; this automatic
+  // cleanup must honor the same pin policy instead of deleting the exact alias underneath it.
+  if (original.pinnedAt !== undefined && isPinnableSessionEntry(sessionKey, original)) {
     return;
   }
   await runSessionMutation({

@@ -109,6 +109,27 @@ it.each(writers)(
   },
 );
 
+it.each([
+  { label: "sidebar-root", patch: { pinnedAt: 1_000, sidebarRoot: true }, preserved: true },
+  {
+    label: "nested-child",
+    patch: { pinnedAt: 1_000, spawnedBy: "agent:main:main" },
+    preserved: false,
+  },
+])("honors the pin contract for a $label continuation", async ({ patch, preserved }) => {
+  await withContinuation(async (context) => {
+    await upsertSessionEntryCore(exact, { ...patch, updatedAt: 2 });
+    await removeIdle(exact.sessionKey, undefined, context);
+    if (preserved) {
+      expect(loadSessionEntry(exact)?.sessionId).toBe("run-123");
+      await upsertSessionEntryCore(exact, { pinnedAt: undefined, updatedAt: 3 });
+      await removeIdle(exact.sessionKey, undefined, context);
+    }
+    expect(loadSessionEntry(exact)).toBeUndefined();
+    expect(loadSessionEntry(base)?.sessionId).toBe("run-123");
+  });
+});
+
 it.each(writers)("refuses a %s enqueue that loses to continuation cleanup", async (writer) => {
   await withContinuation(async (context) => {
     const snapshotRead = createDeferredCore();
