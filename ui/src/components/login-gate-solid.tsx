@@ -260,13 +260,18 @@ function StatusBody(
   const retrySeconds = () =>
     Math.max(0, Math.ceil(((props.model.reconnectAt ?? 0) - props.now) / 1000));
   const connectLabel = () => {
-    if (props.model.connecting) {
-      return t("connection.connecting");
-    }
+    // Pairing recovery owns its own action copy; the pending hint only fills the ordinary
+    // Connect/Retry action.
     if (props.feedback.kind === "pairing-rejected" || props.feedback.kind === "pairing-expired") {
       return t("login.failure.pairing.requestAgain");
     }
-    return t(waiting() ? "login.failure.pairing.checkNow" : "common.connect");
+    if (waiting()) {
+      return t("login.failure.pairing.checkNow");
+    }
+    if (props.model.connecting) {
+      return t("connection.connecting");
+    }
+    return t("common.connect");
   };
   return (
     <section
