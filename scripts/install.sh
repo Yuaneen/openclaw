@@ -1625,7 +1625,16 @@ node_components_satisfy_package_engine() {
 }
 
 resolve_node_package_engine() {
-    [[ "$INSTALL_METHOD" == npm ]] || return 0
+    if [[ "$INSTALL_METHOD" != npm ]]; then
+        # A Git checkout of main carries main's own engines, so its runtime
+        # admission must not apply the published-package floor. Pinned Git refs
+        # keep that fallback because their engines may still be stricter.
+        if [[ "$INSTALL_METHOD" == git && "$OPENCLAW_VERSION" == main ]]; then
+            NODE_PACKAGE_ENGINE=">=24.${NODE_24_MIN_MINOR}.${NODE_24_MIN_PATCH} <25 || >=26.${NODE_26_MIN_MINOR}.0"
+            NODE_SUPPORTED_VERSION_LABEL="${NODE_24_MIN_MINOR}.${NODE_24_MIN_PATCH}+ or ${NODE_26_MIN_MINOR}.0+"
+        fi
+        return 0
+    fi
     # Consume --beta here so admission and installation use the same selected target.
     if [[ "$USE_BETA" == 1 ]]; then
         OPENCLAW_VERSION="$(bounded_probe_output 'beta tag' resolve_beta_version || true)"

@@ -2314,6 +2314,40 @@ EOF
     },
   );
 
+  it.each([
+    { method: "git", version: "main", expected: 0 },
+    { method: "git", version: "v2026.10.8", expected: 1 },
+  ])(
+    "admits a Git $version runtime by the checked source's engine contract",
+    ({ method, version, expected }) => {
+      const result = runInstallShell(
+        [
+          'source "scripts/install.sh"',
+          "set +e",
+          'node() { printf "v%s\\n" "$FAKE_NODE_VERSION"; }',
+          "node_binary_has_safe_sqlite() { return 0; }",
+          `INSTALL_METHOD=${method}`,
+          `OPENCLAW_VERSION=${version}`,
+          "resolve_node_package_engine",
+          "node_binary_is_supported node",
+          'printf "verdict=%s\\n" "$?"',
+          'printf "engine=%s\\n" "$NODE_PACKAGE_ENGINE"',
+          "exit 0",
+        ].join("\n"),
+        {
+          TERM: "dumb",
+          FAKE_NODE_VERSION: "24.21.0",
+          OPENCLAW_INSTALL_CLI_SH_NO_RUN: "1",
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout, result.stderr).toContain(`verdict=${expected}`);
+      if (version === "main") {
+        expect(result.stdout).toContain("engine=>=24.16.0 <25 || >=26.1.0");
+      }
+    },
+  );
+
   it("persists a supported Linux Node path before noninteractive shell guards", () => {
     const tmp = tempDirs.make("openclaw-install-linux-node-path-");
     const home = join(tmp, "home");
