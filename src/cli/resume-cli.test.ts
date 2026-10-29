@@ -7,6 +7,7 @@ import { encodeResumeHandoff } from "../shared/resume-handoff.js";
 import type { TuiSessionList } from "../tui/tui-backend.js";
 import { registerResumeCli } from "./resume-cli.js";
 import { runResumeCommand } from "./resume-cli.runtime.js";
+import { installCliSignalExitHandlers, waitForCliSignalExit } from "./signal-exit-barrier.js";
 import { createCliTtyMock } from "./test-runtime-capture.js";
 
 const mocks = vi.hoisted(() => ({
@@ -122,6 +123,36 @@ describe("runResumeCommand", () => {
     ]);
     expect(mocks.exit).toHaveBeenCalledExactlyOnceWith(1);
     expect(client.stop).toHaveBeenCalledOnce();
+    expect(mocks.selectStyled).not.toHaveBeenCalled();
+    expect(mocks.runTui).not.toHaveBeenCalled();
+  });
+
+  it("stops the preflight client when the CLI signal drain interrupts session loading", async () => {
+    const client = createGatewayClient([]);
+    let finishLoad: (value: { sessions: [] }) => void = () => {};
+    client.listSessions.mockReturnValue(
+      new Promise((resolve) => {
+        finishLoad = resolve;
+      }),
+    );
+    const pending = runResumeCommand(undefined, {});
+    await vi.waitFor(() => {
+      expect(client.listSessions).toHaveBeenCalledOnce();
+    });
+
+    const previousExitCode = process.exitCode;
+    const releaseSignals = installCliSignalExitHandlers();
+    try {
+      process.emit("SIGINT");
+      await expect(waitForCliSignalExit()).resolves.toBe(130);
+    } finally {
+      releaseSignals();
+      process.exitCode = previousExitCode;
+    }
+
+    expect(client.stop).toHaveBeenCalled();
+    finishLoad([]);
+    await pending;
     expect(mocks.selectStyled).not.toHaveBeenCalled();
     expect(mocks.runTui).not.toHaveBeenCalled();
   });
