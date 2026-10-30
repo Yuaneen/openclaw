@@ -20,10 +20,10 @@ import {
   type AttachmentContextBlock,
   renderMediaAttachmentDisposition,
 } from "./media-attachment-outcomes.js";
+import { formatMediaFailureSummary } from "./media-failure-reason.js";
 import type { MediaExecutionContext } from "./provider-execution.js";
 import { resolveConcurrency } from "./resolve.js";
 import { createScopedMediaAttachmentCache } from "./runner.attachments.js";
-import { formatMediaFailureSummary } from "./media-failure-reason.js";
 import { buildProviderRegistry, normalizeMediaAttachments, runCapability } from "./runner.js";
 import type {
   MediaUnderstandingCapability,
@@ -134,7 +134,10 @@ export async function applyMediaUnderstanding(params: {
                   ({ index }) =>
                     [
                       index,
-                      { kind: "failed" as const, ...(failureReason ? { reason: failureReason } : {}) },
+                      {
+                        kind: "failed" as const,
+                        ...(failureReason ? { reason: failureReason } : {}),
+                      },
                     ] as const,
                 ),
                 ...selection.droppedAttachmentIndexes.map(

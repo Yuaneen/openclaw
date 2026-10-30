@@ -42,6 +42,7 @@ import {
   resolveConfiguredMediaEntryCapabilities,
 } from "./entry-capabilities.js";
 import { inspectLocalAudioSelection } from "./local-audio.js";
+import { formatMediaFailureReason, formatMediaFailureSummary } from "./media-failure-reason.js";
 import {
   assertMediaExecutionCurrent,
   hasProviderAuthAvailable,
@@ -60,7 +61,6 @@ import {
   resolveScopeDecision,
   type ResolvedMediaModelEntry,
 } from "./resolve.js";
-import { formatMediaFailureReason, formatMediaFailureSummary } from "./media-failure-reason.js";
 import {
   buildModelDecision,
   formatDecisionSummary,

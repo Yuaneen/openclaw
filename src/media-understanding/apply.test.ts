@@ -382,12 +382,14 @@ describe("applyMediaUnderstanding", () => {
 
   it("keeps provider response detail out of the failed audio marker", async () => {
     const ctx = await createAudioCtx();
-    const transcribeAudio = vi.fn<TranscribeAudio>().mockRejectedValue(
-      new ProviderHttpError(
-        "Audio transcription failed (HTTP 401): tenant customer-42 is suspended [request_id=req_secret]",
-        { status: 401, code: "invalid_authentication", requestId: "req_secret" },
-      ),
-    );
+    const transcribeAudio = vi
+      .fn<TranscribeAudio>()
+      .mockRejectedValue(
+        new ProviderHttpError(
+          "Audio transcription failed (HTTP 401): tenant customer-42 is suspended [request_id=req_secret]",
+          { status: 401, code: "invalid_authentication", requestId: "req_secret" },
+        ),
+      );
     const cfg = createGroqAudioConfig();
 
     await applyAudio(ctx, transcribeAudio, { cfg });

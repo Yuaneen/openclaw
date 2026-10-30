@@ -3,14 +3,17 @@ import { ProviderHttpError } from "../agents/provider-http-errors.js";
 import { formatMediaFailureReason, formatMediaFailureSummary } from "./media-failure-reason.js";
 import { summarizeDecisionReason } from "./runner.entries.js";
 
-function providerFailure(message: string, params: { status: number; code?: string; requestId?: string }) {
+function providerFailure(
+  message: string,
+  params: { status: number; code?: string; requestId?: string },
+) {
   return new ProviderHttpError(message, params);
 }
 
 describe("media failure reason helpers", () => {
   it("summarizes a provider failure with status and code only", () => {
     const error = providerFailure(
-      'Audio transcription failed (HTTP 429): tenant customer-42 is suspended [request_id=req_secret]',
+      "Audio transcription failed (HTTP 429): tenant customer-42 is suspended [request_id=req_secret]",
       { status: 429, code: "insufficient_quota", requestId: "req_secret" },
     );
 
