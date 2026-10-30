@@ -878,3 +878,12 @@ describe("Workboard prepared launch restart recovery", () => {
     },
   );
 });
+
+describe("Workboard lifecycle scoped reads", () => {
+  it("reads only the event session when syncing a lifecycle event", async () => {
+    const { card, end } = await linked();
+    using list = vi.spyOn(store, "list");
+    await end();
+    expect(list).toHaveBeenCalledWith({ sessionKey: workboardSessionKeyForCard(card) });
+  });
+});
