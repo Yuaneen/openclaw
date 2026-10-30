@@ -172,6 +172,11 @@ describe("SystemAgentChatEngine runtime", () => {
       // only report after that write and the run's own settlement finish.
       await writeStarted.promise;
       const disposing = Promise.resolve(host.dispose());
+      // Retirement must still be pending a macrotask later, while the locked write is in flight.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25);
+      });
+      expect(host.active).toBe(true);
       const raced = await Promise.race([
         disposing.then(() => "settled" as const),
         Promise.resolve().then(() => "pending" as const),
@@ -189,6 +194,8 @@ describe("SystemAgentChatEngine runtime", () => {
   });
 
   it("cancels a run before its commit boundary and writes nothing", async () => {
+    const authorizeEntered = createDeferred();
+    const authorizeGate = createDeferred<void>();
     useSetupConfig({}, "cancel-before-gate-hash");
     useConfigWriter();
     useChannelSetup(async (config, prompter) => {
@@ -198,11 +205,19 @@ describe("SystemAgentChatEngine runtime", () => {
     installAudit();
     const host = new ChatWizardHost({
       surface: "gateway",
-      beforePersistentApply: async () => {},
+      beforePersistentApply: async () => {
+        authorizeEntered.resolve();
+        await authorizeGate.promise;
+      },
     });
     expect((await host.startChannel("zalouser")).text).toContain("Waiting for channel login");
-    await host.dispose();
-    expect(host.active).toBe(false);
+    const reply = host.resolveReply("continue");
+    // Cancel while the last authority check is still awaiting, before the commit lock.
+    await authorizeEntered.promise;
+    const disposing = host.dispose();
+    authorizeGate.resolve();
+    await disposing;
+    expect((await reply).configWritten).toBe(false);
     expect(mocks.writeWizardConfigFile).not.toHaveBeenCalled();
   });
 
