@@ -30,10 +30,8 @@ export function readLifecycleCandidateIds(db: WorkboardSqlConnection): string[] 
     OR claim_json IS NOT NULL
     OR stale_json IS NOT NULL
   )`;
-  const cleanup = sql<SqlBool>`json_valid(automation_json)
-    AND json_extract(automation_json, '$.workspace.kind') = 'worktree'
-    AND json_extract(automation_json, '$.workspace.path') IS NOT NULL
-    AND json_extract(automation_json, '$.workspace.sourcePath') IS NOT NULL`;
+  const cleanup = sql<SqlBool>`COALESCE(automation_json, '') LIKE '%"kind":"worktree"%'
+    AND COALESCE(automation_json, '') LIKE '%"sourcePath"%'`;
   return readIds(db, sql`(${lifecycle}) OR (${cleanup})`);
 }
 
