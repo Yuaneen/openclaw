@@ -148,7 +148,7 @@ describe("SystemAgentChatEngine runtime", () => {
 
   it("waits for a locked commit to settle before disposal returns", async () => {
     const writeStarted = createDeferred();
-    const writeGate = createDeferred<void>();
+    const writeGate = createDeferred();
     const prepare = vi.fn(async () => {});
     useSetupConfig({}, "locked-commit-hash");
     mocks.writeWizardConfigFile.mockImplementation(async (config: OpenClawConfig) => {
@@ -195,7 +195,7 @@ describe("SystemAgentChatEngine runtime", () => {
 
   it("cancels a run before its commit boundary and writes nothing", async () => {
     const authorizeEntered = createDeferred();
-    const authorizeGate = createDeferred<void>();
+    const authorizeGate = createDeferred();
     useSetupConfig({}, "cancel-before-gate-hash");
     useConfigWriter();
     useChannelSetup(async (config, prompter) => {
