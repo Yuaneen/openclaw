@@ -587,8 +587,12 @@ export function createWorkboardLifecycleService(params: {
                 }
               }
             }
+            // Reconciliation can move a running worktree card to a terminal status;
+            // re-read only the bounded candidate set before cleanup.
+            const cleanupCards =
+              cardsByKey.size > 0 ? await params.store.list({ lifecycle: true }) : cards;
             if (generation === owner) {
-              await cleanupWorktrees(cards, (message) => ctx.logger.warn(message));
+              await cleanupWorktrees(cleanupCards, (message) => ctx.logger.warn(message));
             }
           });
         } catch (error) {
