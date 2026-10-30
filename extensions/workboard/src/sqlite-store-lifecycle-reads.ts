@@ -6,18 +6,25 @@ import {
 import { requiredString, type WorkboardCardDatabase } from "./sqlite-store-records.js";
 import type { WorkboardSqlConnection } from "./sqlite-store-schema.js";
 
-function readIds(db: WorkboardSqlConnection, predicate: Expression<SqlBool>): string[] {
-  const query = getNodeSqliteKysely<WorkboardCardDatabase>(db)
+function readIds(
+  db: WorkboardSqlConnection,
+  predicate: Expression<SqlBool>,
+  boardId?: string,
+): string[] {
+  let query = getNodeSqliteKysely<WorkboardCardDatabase>(db)
     .selectFrom("workboard_cards")
     .select("id")
-    .where(predicate);
+    .where(sql`(${predicate})`);
+  if (boardId !== undefined) {
+    query = query.where("board_id", "=", boardId);
+  }
   return Array.from(iterateSqliteQuerySync(db, query)).map((row) => requiredString(row, "id"));
 }
 
 // Reconciliation candidates stay archived-excluded, while terminal worktree
 // cleanup keeps its own archived-safe obligation (path and sourcePath present
 // only until cleanup discharges it).
-export function readLifecycleCandidateIds(db: WorkboardSqlConnection): string[] {
+export function readLifecycleCandidateIds(db: WorkboardSqlConnection, boardId?: string): string[] {
   const lifecycle = sql<SqlBool>`archived_at IS NULL AND (
     status = 'running' OR execution_status = 'running'
     OR (status NOT IN ('review', 'blocked', 'done') AND (
@@ -32,7 +39,7 @@ export function readLifecycleCandidateIds(db: WorkboardSqlConnection): string[] 
   )`;
   const cleanup = sql<SqlBool>`COALESCE(automation_json, '') LIKE '%"kind":"worktree"%'
     AND COALESCE(automation_json, '') LIKE '%"sourcePath"%'`;
-  return readIds(db, sql`(${lifecycle}) OR (${cleanup})`);
+  return readIds(db, sql`(${lifecycle}) OR (${cleanup})`, boardId);
 }
 
 // Session lifecycle events also match a bare subagent key by suffix, including
@@ -40,7 +47,7 @@ export function readLifecycleCandidateIds(db: WorkboardSqlConnection): string[] 
 // run ids stay eligible until the authoritative matcher decides.
 export function readLifecycleEventCandidateIds(
   db: WorkboardSqlConnection,
-  source: { sessionKey?: string; runId?: string },
+  source: { sessionKey?: string; runId?: string; boardId?: string },
 ): string[] {
   const clauses: Expression<SqlBool>[] = [];
   if (source.sessionKey) {
@@ -86,5 +93,9 @@ export function readLifecycleEventCandidateIds(
   if (clauses.length === 0) {
     return [];
   }
-  return readIds(db, sql`archived_at IS NULL AND (${sql.join(clauses, sql` OR `)})`);
+  return readIds(
+    db,
+    sql`archived_at IS NULL AND (${sql.join(clauses, sql` OR `)})`,
+    source.boardId,
+  );
 }

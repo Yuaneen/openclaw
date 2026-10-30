@@ -325,7 +325,7 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
       }
       query = query.where("id", "in", sqliteStringSet(ids));
     } else if (scope?.kind === "lifecycle") {
-      const ids = readLifecycleCandidateIds(this.db);
+      const ids = readLifecycleCandidateIds(this.db, scope.boardId);
       if (ids.length === 0) {
         return [];
       }

@@ -954,6 +954,25 @@ describe("Workboard lifecycle scoped reads", () => {
     expect(candidateIds).not.toContain(card.id);
   });
 
+  it("preserves board filtering for lifecycle candidate reads", async () => {
+    const ops = await store.create({ title: "Ops active", status: "running", boardId: "ops" });
+    await store.create({ title: "Default active", status: "running", boardId: "default" });
+
+    const ids = (await store.list({ boardId: "ops", lifecycle: true })).map((card) => card.id);
+
+    expect(ids).toEqual([ops.id]);
+  });
+
+  it("preserves board filtering for lifecycle event reads", async () => {
+    const sessionKey = "agent:main:shared-board";
+    const ops = await createLinkedCard(store, { boardId: "ops", sessionKey });
+    await createLinkedCard(store, { boardId: "default", sessionKey });
+
+    const ids = (await store.list({ boardId: "ops", sessionKey })).map((card) => card.id);
+
+    expect(ids).toEqual([ops.id]);
+  });
+
   it("does not decode child rows of settled history", async () => {
     const { store: isolated, dbPath } = createWorkboardSqliteTestHarness();
     try {

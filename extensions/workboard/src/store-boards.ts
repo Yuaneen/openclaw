@@ -86,6 +86,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
         kind: "lifecycle-event",
         ...(sessionKey === undefined ? {} : { sessionKey }),
         ...(runId === undefined ? {} : { runId }),
+        ...(boardId === undefined ? {} : { boardId }),
       });
     }
     return readCards(this.store, boardId === undefined ? undefined : { kind: "board", boardId });
