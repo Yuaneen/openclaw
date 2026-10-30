@@ -880,10 +880,67 @@ describe("Workboard prepared launch restart recovery", () => {
 });
 
 describe("Workboard lifecycle scoped reads", () => {
+  beforeEach(resetStore);
+
   it("reads only the event session when syncing a lifecycle event", async () => {
     const { card, end } = await linked();
     using list = vi.spyOn(store, "list");
     await end();
     expect(list).toHaveBeenCalledWith({ sessionKey: workboardSessionKeyForCard(card) });
+  });
+
+  it("lists only cards linked to the requested session", async () => {
+    const linkedCard = await createLinkedCard(store, { sessionKey: "agent:main:linked" });
+    await store.create({
+      title: "Other session",
+      status: "ready",
+      sessionKey: "agent:main:other",
+    });
+
+    const cards = await store.list({ sessionKey: "agent:main:linked" });
+
+    expect(cards.map((card) => card.id)).toEqual([linkedCard.id]);
+  });
+
+  it("excludes settled history from the lifecycle candidate read", async () => {
+    const active = await createLinkedCard(store);
+    const settled = await store.create({ title: "Settled history", status: "done" });
+
+    const candidateIds = (await store.list({ lifecycle: true })).map((card) => card.id);
+
+    expect(candidateIds).toContain(active.id);
+    expect(candidateIds).not.toContain(settled.id);
+  });
+});
+
+describe("Workboard lifecycle sweep candidate reads", () => {
+  beforeEach(() => {
+    resetStore();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("uses the lifecycle candidate read for the sweep", async () => {
+    const active = await createLinkedCard(store, {
+      status: "running",
+      sessionKey: "agent:main:active",
+    });
+    await store.create({ title: "Settled history", status: "done" });
+    using list = vi.spyOn(store, "list");
+    using runOperation = vi.spyOn(store, "runOperation");
+    const service = managedService(async () => lifecycleSnapshot());
+    const lifetime = new AbortController();
+    try {
+      await service.start(serviceContext());
+      service.onGatewayStart(lifetime.signal);
+      expect(runOperation).toHaveBeenCalled();
+      await runOperation.mock.results[0]?.value;
+      expect(list).toHaveBeenCalledWith({ lifecycle: true });
+      expect(active.id).toBeTruthy();
+    } finally {
+      lifetime.abort();
+      service.onGatewayStop();
+      await runOperation.mock.results[0]?.value;
+    }
   });
 });
