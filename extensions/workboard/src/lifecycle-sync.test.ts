@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import {
   createHookRunner,
   createMockPluginRegistry,
@@ -910,6 +911,26 @@ describe("Workboard lifecycle scoped reads", () => {
 
     expect(candidateIds).toContain(active.id);
     expect(candidateIds).not.toContain(settled.id);
+  });
+
+  it("does not decode child rows of settled history", async () => {
+    const { store: isolated, dbPath } = createWorkboardSqliteTestHarness();
+    try {
+      const active = await isolated.create({ title: "Active card", status: "running" });
+      const history = await isolated.create({ title: "Settled history", status: "done" });
+      const db = new DatabaseSync(dbPath);
+      // Full hydration would reject this empty required body; a bounded read never sees it.
+      db.prepare(
+        "INSERT INTO workboard_card_comments (id, card_id, ordinal, body, created_at) VALUES (?, ?, 0, '', ?)",
+      ).run("empty-history-body", history.id, Date.now());
+      db.close();
+
+      const candidates = await isolated.list({ lifecycle: true });
+
+      expect(candidates.map((card) => card.id)).toEqual([active.id]);
+    } finally {
+      await isolated.close();
+    }
   });
 });
 
