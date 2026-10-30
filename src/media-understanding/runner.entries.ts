@@ -197,25 +197,21 @@ function readProviderHttpFailure(error: unknown): ProviderHttpFailure | undefine
   if (!(error instanceof Error) || error.name !== "ProviderHttpError") {
     return undefined;
   }
-  const record: {
-    status?: unknown;
-    code?: unknown;
-    errorType?: unknown;
-    requestId?: unknown;
-  } = error;
-  if (typeof record.status !== "number") {
+  if (!("status" in error) || typeof error.status !== "number") {
     return undefined;
   }
   const code =
-    typeof record.code === "string"
-      ? record.code
-      : typeof record.errorType === "string"
-        ? record.errorType
+    "code" in error && typeof error.code === "string"
+      ? error.code
+      : "errorType" in error && typeof error.errorType === "string"
+        ? error.errorType
         : undefined;
+  const requestId =
+    "requestId" in error && typeof error.requestId === "string" ? error.requestId : undefined;
   return {
-    status: record.status,
+    status: error.status,
     ...(code ? { code } : {}),
-    ...(typeof record.requestId === "string" ? { requestId: record.requestId } : {}),
+    ...(requestId ? { requestId } : {}),
   };
 }
 
