@@ -488,7 +488,6 @@ export class ChatWizardHost {
           prompter,
           hooks.beforePersistentApply,
           (value) => providers.push(value),
-          undefined,
           hooks.lockCancellation,
         ),
     });
