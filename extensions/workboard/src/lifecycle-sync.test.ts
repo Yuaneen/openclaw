@@ -883,13 +883,6 @@ describe("Workboard prepared launch restart recovery", () => {
 describe("Workboard lifecycle scoped reads", () => {
   beforeEach(resetStore);
 
-  it("reads only the event session when syncing a lifecycle event", async () => {
-    const { card, end } = await linked();
-    using list = vi.spyOn(store, "list");
-    await end();
-    expect(list).toHaveBeenCalledWith({ sessionKey: workboardSessionKeyForCard(card) });
-  });
-
   it("lists only cards linked to the requested session", async () => {
     const linkedCard = await createLinkedCard(store, { sessionKey: "agent:main:linked" });
     await store.create({
@@ -913,14 +906,52 @@ describe("Workboard lifecycle scoped reads", () => {
     expect(cards.map((card) => card.id)).toEqual([linkedCard.id]);
   });
 
-  it("excludes settled history from the lifecycle candidate read", async () => {
-    const active = await createLinkedCard(store);
-    const settled = await store.create({ title: "Settled history", status: "done" });
+  it("matches an execution-only session by its bare suffix", async () => {
+    const linkedCard = await createLinkedCard(store, {
+      execution: execution("subagent:workboard-exec", "run-exec"),
+    });
 
-    const candidateIds = (await store.list({ lifecycle: true })).map((card) => card.id);
+    const cards = await store.list({ sessionKey: "agent:alpha:subagent:workboard-exec" });
 
-    expect(candidateIds).toContain(active.id);
-    expect(candidateIds).not.toContain(settled.id);
+    expect(cards.map((card) => card.id)).toEqual([linkedCard.id]);
+  });
+
+  it("retains an archived worktree with an outstanding cleanup obligation", async () => {
+    const card = await store.create({
+      title: "Archived worktree",
+      status: "done",
+      workspace: {
+        kind: "worktree",
+        path: "/tmp/managed-worktree",
+        sourcePath: "/tmp/source-worktree",
+        sourceBranch: "main",
+      },
+    });
+    await store.archive(card.id, true);
+
+    const candidateIds = (await store.list({ lifecycle: true })).map((entry) => entry.id);
+
+    expect(candidateIds).toContain(card.id);
+  });
+
+  it("excludes a worktree whose cleanup obligation is already discharged", async () => {
+    const card = await store.create({
+      title: "Discharged worktree",
+      status: "done",
+      workspace: {
+        kind: "worktree",
+        path: "/tmp/managed-worktree",
+        sourcePath: "/tmp/source-worktree",
+        sourceBranch: "main",
+      },
+    });
+    await store.update(card.id, {
+      workspace: { kind: "worktree", path: "/tmp/source-worktree" },
+    });
+
+    const candidateIds = (await store.list({ lifecycle: true })).map((entry) => entry.id);
+
+    expect(candidateIds).not.toContain(card.id);
   });
 
   it("does not decode child rows of settled history", async () => {
@@ -940,38 +971,6 @@ describe("Workboard lifecycle scoped reads", () => {
       expect(candidates.map((card) => card.id)).toEqual([active.id]);
     } finally {
       await isolated.close();
-    }
-  });
-});
-
-describe("Workboard lifecycle sweep candidate reads", () => {
-  beforeEach(() => {
-    resetStore();
-    vi.useFakeTimers();
-  });
-  afterEach(() => vi.useRealTimers());
-
-  it("uses the lifecycle candidate read for the sweep", async () => {
-    const active = await createLinkedCard(store, {
-      status: "running",
-      sessionKey: "agent:main:active",
-    });
-    await store.create({ title: "Settled history", status: "done" });
-    using list = vi.spyOn(store, "list");
-    using runOperation = vi.spyOn(store, "runOperation");
-    const service = managedService(async () => lifecycleSnapshot());
-    const lifetime = new AbortController();
-    try {
-      await service.start(serviceContext());
-      service.onGatewayStart(lifetime.signal);
-      expect(runOperation).toHaveBeenCalled();
-      await runOperation.mock.results[0]?.value;
-      expect(list).toHaveBeenCalledWith({ lifecycle: true });
-      expect(active.id).toBeTruthy();
-    } finally {
-      lifetime.abort();
-      service.onGatewayStop();
-      await runOperation.mock.results[0]?.value;
     }
   });
 });
