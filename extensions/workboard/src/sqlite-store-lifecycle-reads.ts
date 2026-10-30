@@ -14,7 +14,7 @@ function readIds(
   let query = getNodeSqliteKysely<WorkboardCardDatabase>(db)
     .selectFrom("workboard_cards")
     .select("id")
-    .where(sql`(${predicate})`);
+    .where(sql<SqlBool>`(${predicate})`);
   if (boardId !== undefined) {
     query = query.where("board_id", "=", boardId);
   }
@@ -39,7 +39,7 @@ export function readLifecycleCandidateIds(db: WorkboardSqlConnection, boardId?: 
   )`;
   const cleanup = sql<SqlBool>`COALESCE(automation_json, '') LIKE '%"kind":"worktree"%'
     AND COALESCE(automation_json, '') LIKE '%"sourcePath"%'`;
-  return readIds(db, sql`(${lifecycle}) OR (${cleanup})`, boardId);
+  return readIds(db, sql<SqlBool>`(${lifecycle}) OR (${cleanup})`, boardId);
 }
 
 // Session lifecycle events also match a bare subagent key by suffix, including
@@ -53,12 +53,12 @@ export function readLifecycleEventCandidateIds(
   if (source.sessionKey) {
     const key = source.sessionKey;
     clauses.push(
-      sql`session_key = ${key}`,
-      sql`execution_session_key = ${key}`,
-      sql`(session_key LIKE 'subagent:workboard-%' AND ${key} LIKE '%:' || session_key)`,
-      sql`(execution_session_key LIKE 'subagent:workboard-%' AND ${key} LIKE '%:' || execution_session_key)`,
-      sql`(COALESCE(session_key, '') = '' AND ${key} LIKE '%subagent:workboard-%' || id)`,
-      sql`EXISTS (
+      sql<SqlBool>`session_key = ${key}`,
+      sql<SqlBool>`execution_session_key = ${key}`,
+      sql<SqlBool>`(session_key LIKE 'subagent:workboard-%' AND ${key} LIKE '%:' || session_key)`,
+      sql<SqlBool>`(execution_session_key LIKE 'subagent:workboard-%' AND ${key} LIKE '%:' || execution_session_key)`,
+      sql<SqlBool>`(COALESCE(session_key, '') = '' AND ${key} LIKE '%subagent:workboard-%' || id)`,
+      sql<SqlBool>`EXISTS (
         SELECT 1 FROM workboard_card_attempts AS attempt
         WHERE attempt.card_id = workboard_cards.id
           AND (
@@ -67,7 +67,7 @@ export function readLifecycleEventCandidateIds(
               AND ${key} LIKE '%:' || attempt.session_key)
           )
       )`,
-      sql`EXISTS (
+      sql<SqlBool>`EXISTS (
         SELECT 1 FROM workboard_card_events AS event
         WHERE event.card_id = workboard_cards.id
           AND (
@@ -81,12 +81,12 @@ export function readLifecycleEventCandidateIds(
   if (source.runId) {
     const runId = source.runId;
     clauses.push(
-      sql`run_id = ${runId}`,
-      sql`execution_run_id = ${runId}`,
-      sql`run_id LIKE 'workboard:' || id || ':%'`,
-      sql`EXISTS (SELECT 1 FROM workboard_card_attempts AS attempt
+      sql<SqlBool>`run_id = ${runId}`,
+      sql<SqlBool>`execution_run_id = ${runId}`,
+      sql<SqlBool>`run_id LIKE 'workboard:' || id || ':%'`,
+      sql<SqlBool>`EXISTS (SELECT 1 FROM workboard_card_attempts AS attempt
         WHERE attempt.card_id = workboard_cards.id AND attempt.run_id = ${runId})`,
-      sql`EXISTS (SELECT 1 FROM workboard_card_events AS event
+      sql<SqlBool>`EXISTS (SELECT 1 FROM workboard_card_events AS event
         WHERE event.card_id = workboard_cards.id AND event.run_id = ${runId})`,
     );
   }
@@ -95,7 +95,7 @@ export function readLifecycleEventCandidateIds(
   }
   return readIds(
     db,
-    sql`archived_at IS NULL AND (${sql.join(clauses, sql` OR `)})`,
+    sql<SqlBool>`archived_at IS NULL AND (${sql.join(clauses, sql<SqlBool>` OR `)})`,
     source.boardId,
   );
 }
