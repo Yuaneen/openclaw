@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { ProviderHttpError } from "../agents/provider-http-errors.js";
 import type { MsgContext } from "../auto-reply/templating.js";
 import type {
   MediaUnderstandingCapabilityConfig,
@@ -377,6 +378,23 @@ describe("applyMediaUnderstanding", () => {
       Body: "[Audio attachment could not be analyzed]",
       BodyForAgent: ctx.Body,
     });
+  });
+
+  it("carries the provider status and code into the failed audio marker", async () => {
+    const ctx = await createAudioCtx();
+    const transcribeAudio = vi.fn<TranscribeAudio>().mockRejectedValue(
+      new ProviderHttpError("provider POST request failed", {
+        status: 401,
+        code: "invalid_authentication",
+      }),
+    );
+    const cfg = createGroqAudioConfig();
+
+    await applyAudio(ctx, transcribeAudio, { cfg });
+
+    expect(ctx.Body).toContain(
+      "[Audio attachment could not be analyzed: provider POST request failed (HTTP 401 code=invalid_authentication)]",
+    );
   });
 
   it("falls back to a CLI transcript after provider failure", async () => {

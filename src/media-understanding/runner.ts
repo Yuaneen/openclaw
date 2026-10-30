@@ -63,6 +63,8 @@ import {
 import {
   buildModelDecision,
   formatDecisionSummary,
+  formatMediaFailureReason,
+  normalizeDecisionReason,
   runCliEntry,
   runProviderEntry,
   type MediaRequestOverrides,
@@ -508,7 +510,7 @@ async function runAttachmentEntries(
               entry,
               entryType,
               outcome: "failed",
-              reason: String(attempt.error),
+              reason: formatMediaFailureReason(attempt.error),
             }),
           );
         }
@@ -555,7 +557,7 @@ async function runAttachmentEntries(
             entry,
             entryType,
             outcome: "failed",
-            reason: String(err),
+            reason: formatMediaFailureReason(err),
           }),
         );
         if (shouldLogVerbose()) {
@@ -790,7 +792,12 @@ export async function runCapability(
     attachmentDispositions[attachment.index] = output
       ? { kind: "handled" }
       : attempts.length > 0
-        ? { kind: "failed" }
+        ? {
+            kind: "failed",
+            reason: normalizeDecisionReason(
+              attempts.find((attempt) => attempt.outcome === "failed")?.reason,
+            ),
+          }
         : { kind: "no-model" };
     attachmentDecisions.push({
       attachmentIndex: attachment.index,
