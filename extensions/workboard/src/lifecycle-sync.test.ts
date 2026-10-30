@@ -903,6 +903,16 @@ describe("Workboard lifecycle scoped reads", () => {
     expect(cards.map((card) => card.id)).toEqual([linkedCard.id]);
   });
 
+  it("matches a lifecycle event by a bare subagent session suffix", async () => {
+    const linkedCard = await createLinkedCard(store, {
+      sessionKey: "subagent:workboard-suffix",
+    });
+
+    const cards = await store.list({ sessionKey: "agent:alpha:subagent:workboard-suffix" });
+
+    expect(cards.map((card) => card.id)).toEqual([linkedCard.id]);
+  });
+
   it("excludes settled history from the lifecycle candidate read", async () => {
     const active = await createLinkedCard(store);
     const settled = await store.create({ title: "Settled history", status: "done" });
