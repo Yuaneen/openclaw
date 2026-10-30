@@ -189,52 +189,6 @@ export function findDecisionReason(
   return undefined;
 }
 
-type ProviderHttpFailure = { status: number; code?: string; requestId?: string };
-
-// Provider errors can cross a module boundary (test/compiled subprocesses), so
-// detect their stable shape instead of relying on a single class identity.
-function readProviderHttpFailure(error: unknown): ProviderHttpFailure | undefined {
-  if (!(error instanceof Error) || error.name !== "ProviderHttpError") {
-    return undefined;
-  }
-  if (!("status" in error) || typeof error.status !== "number") {
-    return undefined;
-  }
-  const code =
-    "code" in error && typeof error.code === "string"
-      ? error.code
-      : "errorType" in error && typeof error.errorType === "string"
-        ? error.errorType
-        : undefined;
-  const requestId =
-    "requestId" in error && typeof error.requestId === "string" ? error.requestId : undefined;
-  return {
-    status: error.status,
-    ...(code ? { code } : {}),
-    ...(requestId ? { requestId } : {}),
-  };
-}
-
-/** Adds the provider's status, code, and request id when the message omits them. */
-export function formatMediaFailureReason(error: unknown): string {
-  const detail = String(error);
-  const providerFailure = readProviderHttpFailure(error);
-  if (!providerFailure) {
-    return detail;
-  }
-  const additions: string[] = [];
-  if (!detail.includes(`HTTP ${providerFailure.status}`)) {
-    additions.push(`HTTP ${providerFailure.status}`);
-  }
-  if (providerFailure.code && !detail.includes(providerFailure.code)) {
-    additions.push(`code=${providerFailure.code}`);
-  }
-  if (providerFailure.requestId && !detail.includes(providerFailure.requestId)) {
-    additions.push(`request_id=${providerFailure.requestId}`);
-  }
-  return additions.length > 0 ? `${detail} (${additions.join(" ")})` : detail;
-}
-
 /** Trims provider/runtime error prefixes into a stable human-readable reason. */
 export function normalizeDecisionReason(reason?: string): string | undefined {
   const trimmed = reason?.trim();

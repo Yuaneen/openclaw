@@ -23,7 +23,7 @@ import {
 import type { MediaExecutionContext } from "./provider-execution.js";
 import { resolveConcurrency } from "./resolve.js";
 import { createScopedMediaAttachmentCache } from "./runner.attachments.js";
-import { formatMediaFailureReason, normalizeDecisionReason } from "./runner.entries.js";
+import { formatMediaFailureSummary } from "./media-failure-reason.js";
 import { buildProviderRegistry, normalizeMediaAttachments, runCapability } from "./runner.js";
 import type {
   MediaUnderstandingCapability,
@@ -113,7 +113,7 @@ export async function applyMediaUnderstanding(params: {
         try {
           return await runCapability(request);
         } catch (err) {
-          const failureReason = normalizeDecisionReason(formatMediaFailureReason(err));
+          const failureReason = formatMediaFailureSummary(err);
           if (shouldLogVerbose()) {
             logVerbose(`Media understanding task failed: ${String(err)}`);
           }
@@ -132,7 +132,10 @@ export async function applyMediaUnderstanding(params: {
               attachmentDispositions: Object.fromEntries([
                 ...selection.selected.map(
                   ({ index }) =>
-                    [index, { kind: "failed" as const, reason: failureReason }] as const,
+                    [
+                      index,
+                      { kind: "failed" as const, ...(failureReason ? { reason: failureReason } : {}) },
+                    ] as const,
                 ),
                 ...selection.droppedAttachmentIndexes.map(
                   (index) => [index, { kind: "not-selected" as const }] as const,

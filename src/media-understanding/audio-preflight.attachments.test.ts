@@ -23,8 +23,6 @@ const captionFields = { RawBody: caption, CommandBody: caption };
 const allAttachments = { mode: "all", maxAttachments: 2 } as const;
 const limitMarker = "[Audio attachment not processed: attachment limit reached]";
 const failedMarker = "[Audio attachment could not be analyzed]";
-const failedMarkerWithReason =
-  "[Audio attachment could not be analyzed: fixture transcription unavailable]";
 const firstAudio = ["first.wav"];
 const bothAudio = ["first.wav", "second.wav"];
 const emptyTranscript = { emptyFirst: true };
@@ -191,7 +189,7 @@ process.stdout.write(process.argv[3] === "empty" && name === "first.wav" ? "  \\
       "failed selected attachment",
       undefined,
       firstAudio,
-      [failedMarkerWithReason, limitMarker],
+      unsuccessfulMarkers,
       { emptyFirst: true, failFirst: true },
     ],
     [

@@ -380,21 +380,23 @@ describe("applyMediaUnderstanding", () => {
     });
   });
 
-  it("carries the provider status and code into the failed audio marker", async () => {
+  it("keeps provider response detail out of the failed audio marker", async () => {
     const ctx = await createAudioCtx();
     const transcribeAudio = vi.fn<TranscribeAudio>().mockRejectedValue(
-      new ProviderHttpError("provider POST request failed", {
-        status: 401,
-        code: "invalid_authentication",
-      }),
+      new ProviderHttpError(
+        "Audio transcription failed (HTTP 401): tenant customer-42 is suspended [request_id=req_secret]",
+        { status: 401, code: "invalid_authentication", requestId: "req_secret" },
+      ),
     );
     const cfg = createGroqAudioConfig();
 
     await applyAudio(ctx, transcribeAudio, { cfg });
 
     expect(ctx.Body).toContain(
-      "[Audio attachment could not be analyzed: provider POST request failed (HTTP 401 code=invalid_authentication)]",
+      "[Audio attachment could not be analyzed: provider request failed (HTTP 401 code=invalid_authentication)]",
     );
+    expect(ctx.Body).not.toContain("customer-42");
+    expect(ctx.Body).not.toContain("req_secret");
   });
 
   it("falls back to a CLI transcript after provider failure", async () => {
