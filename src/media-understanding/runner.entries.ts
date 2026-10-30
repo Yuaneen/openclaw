@@ -197,12 +197,12 @@ function readProviderHttpFailure(error: unknown): ProviderHttpFailure | undefine
   if (!(error instanceof Error) || error.name !== "ProviderHttpError") {
     return undefined;
   }
-  const record = error as Error & {
+  const record: {
     status?: unknown;
     code?: unknown;
     errorType?: unknown;
     requestId?: unknown;
-  };
+  } = error;
   if (typeof record.status !== "number") {
     return undefined;
   }
